@@ -14,7 +14,7 @@ def setup_logger():
     # Create file handler
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_handler = logging.FileHandler(f'fishing_bot_{timestamp}.log')
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logging.DEBUG)  # File gets all logs
 
     # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -24,5 +24,9 @@ def setup_logger():
     # Add handlers to logger
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
+
+    # Log startup message
+    logger.info("Logger initialized with file and console output")
+    logger.debug("Debug logging enabled")
 
     return logger
