@@ -25,7 +25,7 @@ pip install numpy opencv-python pillow pyaudio pyautogui requests
 ## Usage
 
 1. Run the bot:
-   - Double click on `fishing_bot.py`, OR
+   - Double click on `start_bot.bat`, OR
    - Run `python fishing_bot.py` in terminal
 2. Configure the detection area and key bindings in the GUI
 3. Click "Start" to begin fishing
@@ -36,6 +36,32 @@ pip install numpy opencv-python pillow pyaudio pyautogui requests
 - Detection Area: The screen region to monitor for fish bites (format: x,y,width,height)
 - Cast Key: The key to press for casting the fishing line (default: 'f')
 - Reel Key: The key to press for reeling in fish (default: 'r')
+
+## Testing
+
+### Windows Development Environment (Recommended)
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the tests:
+   ```bash
+   python -m unittest test_bot.py -v
+   ```
+
+Note: Tests must be run on Windows as they require display server access for GUI interaction.
+
+### Test Coverage
+
+The test suite includes:
+- Mouse movement accuracy
+- Keyboard input timing
+- Fish bite detection
+- Full fishing cycle automation
+- Game window detection
+- Error handling
 
 ## Troubleshooting
 
