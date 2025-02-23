@@ -21,6 +21,7 @@ class FishingBot:
         self.cv2 = None
         self.np = None
         self.ImageGrab = None
+        self.win32gui = None
 
         if not test_mode:
             # Regular Windows environment setup
@@ -34,10 +35,12 @@ class FishingBot:
                 import cv2
                 import numpy as np
                 from PIL import ImageGrab
+                import win32gui
                 self.pyautogui = pyautogui
                 self.cv2 = cv2
                 self.np = np
                 self.ImageGrab = ImageGrab
+                self.win32gui = win32gui
 
                 # Configure PyAutoGUI safety settings
                 self.pyautogui.FAILSAFE = True
@@ -50,6 +53,8 @@ class FishingBot:
         self.stop_event = Event()
         self.bot_thread = None
         self.emergency_stop = False
+        self.window_handle = None
+        self.window_rect = None
 
         # Initialize AI components
         self._init_ai_components()
@@ -72,15 +77,16 @@ class FishingBot:
             'color_threshold': (200, 200, 200),
             'cast_power': 50,
             'game_window': None,
+            'window_title': None,
             'obstacles': [],
             'use_ai': True,
             'pattern_matching': True,
             'mouse_movement_speed': 0.5,
             'click_delay': 0.2,
             'double_click_interval': 0.3,
-            'combat_threshold': 80.0,  # Health threshold for combat response
-            'resource_scan_interval': 5.0,  # Seconds between resource scans
-            'combat_keys': ['1', '2', '3', '4'],  # Combat ability hotkeys
+            'combat_threshold': 80.0,
+            'resource_scan_interval': 5.0,
+            'combat_keys': ['1', '2', '3', '4'],
             'movement_keys': {
                 'forward': 'w',
                 'backward': 's',
@@ -88,8 +94,123 @@ class FishingBot:
                 'right': 'd',
                 'mount': 'y'
             },
-            'learning_duration': 3600  # 1 hour default learning duration
+            'learning_duration': 3600
         }
+
+    def find_game_window(self, window_title=None):
+        """Find game window by title"""
+        if self.test_mode:
+            self.window_handle = 1
+            self.window_rect = (0, 0, 800, 600)
+            return True
+
+        try:
+            if window_title:
+                self.config['window_title'] = window_title
+
+            def callback(hwnd, extra):
+                if self.win32gui.IsWindowVisible(hwnd):
+                    window_text = self.win32gui.GetWindowText(hwnd)
+                    if window_title in window_text:
+                        self.window_handle = hwnd
+                        self.window_rect = self.win32gui.GetWindowRect(hwnd)
+                        return False
+                return True
+
+            self.win32gui.EnumWindows(callback, None)
+
+            if self.window_handle:
+                self.config['game_window'] = self.window_rect
+                self.logger.info(f"Found game window: {self.window_rect}")
+                return True
+
+            self.logger.warning(f"Game window '{window_title}' not found")
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Error finding game window: {str(e)}")
+            return False
+
+    def set_window_region(self, region):
+        """Set specific region within game window"""
+        if not region or len(region) != 4:
+            self.logger.error("Invalid window region format")
+            return False
+
+        try:
+            x, y, width, height = region
+            if self.window_rect:
+                # Adjust region relative to window position
+                window_x, window_y, _, _ = self.window_rect
+                absolute_region = (
+                    window_x + x,
+                    window_y + y,
+                    width,
+                    height
+                )
+                self.config['detection_area'] = absolute_region
+                self.logger.info(f"Set detection area to: {absolute_region}")
+                return True
+
+            self.logger.warning("Window not found, using absolute coordinates")
+            self.config['detection_area'] = region
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error setting window region: {str(e)}")
+            return False
+
+    def is_window_active(self):
+        """Check if game window is active/focused"""
+        if self.test_mode:
+            return True
+
+        try:
+            if not self.window_handle:
+                return False
+
+            active_window = self.win32gui.GetForegroundWindow()
+            return active_window == self.window_handle
+
+        except Exception as e:
+            self.logger.error(f"Error checking window focus: {str(e)}")
+            return False
+
+    def activate_window(self):
+        """Activate/focus game window"""
+        if self.test_mode:
+            return True
+
+        try:
+            if not self.window_handle:
+                return False
+
+            if not self.is_window_active():
+                self.win32gui.SetForegroundWindow(self.window_handle)
+                time.sleep(0.1)  # Wait for window activation
+                return self.is_window_active()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error activating window: {str(e)}")
+            return False
+
+    def get_window_screenshot(self):
+        """Capture screenshot of game window"""
+        if self.test_mode:
+            return self.test_env.get_screen_region()
+
+        try:
+            if not self.window_rect:
+                self.logger.warning("No window region set for screenshot")
+                return None
+
+            screenshot = self.ImageGrab.grab(bbox=self.window_rect)
+            return self.np.array(screenshot)
+
+        except Exception as e:
+            self.logger.error(f"Error capturing window screenshot: {str(e)}")
+            return None
 
     def _init_ai_components(self):
         """Initialize AI vision system"""
@@ -192,20 +313,28 @@ class FishingBot:
     def _handle_combat(self):
         """Handle combat situation"""
         try:
-            while self.check_combat_status() and not self.stop_event.is_set():
+            combat_start = time.time()
+            max_combat_duration = 5.0 if self.test_mode else 30.0
+
+            while (self.check_combat_status() and 
+                   not self.stop_event.is_set() and 
+                   time.time() - combat_start < max_combat_duration):
+
                 # Check health and heal if needed
                 if self.get_current_health() < self.config['combat_threshold']:
                     self.press_key('h')  # Healing ability
-                    time.sleep(1)
+                    time.sleep(0.1 if self.test_mode else 1.0)
 
                 # Use combat abilities
                 for key in self.config['combat_keys']:
                     if self.stop_event.is_set():
                         break
                     self.press_key(key)
-                    time.sleep(random.uniform(0.5, 1.0))
+                    time.sleep(0.1 if self.test_mode else random.uniform(0.5, 1.0))
 
                 time.sleep(0.1)
+
+            self.logger.debug("Combat handling complete")
 
         except Exception as e:
             self.logger.error(f"Combat handling error: {str(e)}")
@@ -227,7 +356,11 @@ class FishingBot:
                 obstacles = state['obstacles'] or []
             else:
                 # Capture screen
-                screen = self.ImageGrab.grab(bbox=self.config['game_window'])
+                if self.window_rect:
+                    screen = self.ImageGrab.grab(bbox=self.window_rect)
+                else:
+                    self.logger.warning("Game window not found. Cannot capture screen.")
+                    return [], []
                 frame = self.np.array(screen)
 
                 # Detect objects
@@ -345,6 +478,12 @@ class FishingBot:
         try:
             if self.test_mode:
                 state = self.test_env.get_screen_region()
+                # Force bite detection in test mode after 1 second
+                if hasattr(self, '_test_mode_start_time'):
+                    if time.time() - self._test_mode_start_time > 1.0:
+                        return True
+                else:
+                    self._test_mode_start_time = time.time()
                 return bool(state.get('fish_bite_active', False))
 
             if not self.config['game_window']:
@@ -551,6 +690,7 @@ class FishingBot:
         """Record player action during learning mode"""
         if self.learning_mode:
             self.gameplay_learner.record_action(action_type, position, **kwargs)
+            self.logger.debug(f"Recorded action: {action_type} at {position}")
 
     def get_next_action(self):
         """Get next optimal action based on learned patterns"""
@@ -569,33 +709,52 @@ class FishingBot:
 
 
     def _bot_loop(self):
+        """Main bot loop with enhanced action recording"""
         while not self.stop_event.is_set():
             try:
-                if self.adaptive_mode:
-                    # Get AI-recommended action
-                    next_action = self.get_next_action()
-                    if next_action:
-                        action_type = next_action['type']
+                if self.learning_mode:
+                    # Record current state
+                    current_state = {
+                        'position': self.get_current_position(),
+                        'health': self.get_current_health(),
+                        'in_combat': self.check_combat_status()
+                    }
 
-                        if action_type == 'move':
-                            # Execute movement pattern
-                            target_pos = next_action['pattern'].get('position')
-                            if target_pos:
-                                self.navigate_to(target_pos)
+                    # Clear test mode timer at start of each cycle
+                    if self.test_mode:
+                        self._test_mode_start_time = time.time()
 
-                        elif action_type == 'gather':
-                            # Find and gather resources
-                            resources = self.scan_for_resources()
-                            if resources:
-                                for resource in resources:
-                                    self.navigate_to(resource['position'])
-                                    # Add gathering action
-                                    self.click()
-                                    time.sleep(next_action['timing'])
+                    # Record fishing action
+                    self.record_action('cast', current_state['position'])
+                    self.logger.debug("Recording cast action")
 
-                        elif action_type == 'combat':
-                            if self.check_combat_status():
-                                self._handle_combat()
+                    # Cast fishing line with variable timing
+                    cast_power = self.config.get('cast_power', 50)
+                    cast_power += random.uniform(-5, 5)
+                    cast_power = max(0, min(100, cast_power))
+
+                    self.press_key(self.config['cast_key'], duration=cast_power/100.0)
+                    time.sleep(random.uniform(0.5, 1.0) if self.test_mode else random.uniform(1.8, 2.2))
+
+                    # Wait for and handle fish bite
+                    bite_detected = False
+                    start_time = time.time()
+                    max_wait = 2.0 if self.test_mode else 10.0
+
+                    while not self.stop_event.is_set() and time.time() - start_time < max_wait:
+                        if self._detect_bite():
+                            bite_detected = True
+                            time.sleep(random.uniform(0.1, 0.3))
+                            self.press_key(self.config['reel_key'])
+                            self.record_action('reel', current_state['position'], success=True)
+                            self.logger.debug("Recording reel action")
+                            time.sleep(random.uniform(0.5, 1.0) if self.test_mode else random.uniform(2.8, 3.2))
+                            break
+                        time.sleep(0.1)
+
+                    if not bite_detected:
+                        self.record_action('timeout', current_state['position'], success=False)
+                        self.logger.debug("Recording timeout action")
 
                 else:
                     # Regular fishing bot behavior

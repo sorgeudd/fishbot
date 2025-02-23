@@ -1,7 +1,7 @@
 """AI system for learning and replicating player gameplay patterns"""
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import json
 from pathlib import Path
@@ -9,13 +9,34 @@ from pathlib import Path
 @dataclass
 class GameplayAction:
     """Represents a single player action"""
-    action_type: str  # 'move', 'gather', 'combat', 'mount'
+    action_type: str  # 'move', 'gather', 'combat', 'mount', 'cast', 'reel', 'timeout'
     timestamp: float
     position: Tuple[int, int]
     target_position: Optional[Tuple[int, int]] = None
     resource_type: Optional[str] = None
     combat_ability: Optional[str] = None
     success_rate: float = 1.0
+    success: bool = True
+    metadata: Dict = field(default_factory=dict)
+
+    def to_dict(self) -> Dict:
+        """Convert action to dictionary for serialization"""
+        return {
+            'action_type': self.action_type,
+            'timestamp': self.timestamp,
+            'position': self.position,
+            'target_position': self.target_position,
+            'resource_type': self.resource_type,
+            'combat_ability': self.combat_ability,
+            'success_rate': self.success_rate,
+            'success': self.success,
+            'metadata': self.metadata
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'GameplayAction':
+        """Create action from dictionary"""
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 class GameplayPattern:
     """Base class for all gameplay patterns"""
@@ -32,7 +53,7 @@ class GameplayPattern:
 class GameplayLearner:
     def __init__(self):
         self.logger = logging.getLogger('GameplayLearner')
-        self.recorded_actions = []
+        self.recorded_actions: List[GameplayAction] = []
         self.movement_patterns = {}
         self.resource_preferences = {}
         self.combat_patterns = {}
@@ -72,6 +93,15 @@ class GameplayLearner:
                     self.movement_patterns = patterns.get('movement', {})
                     self.resource_preferences = patterns.get('resources', {})
                     self.combat_patterns = patterns.get('combat', {})
+                    for key, pattern in self.movement_patterns.items():
+                        self.movement_patterns[key] = GameplayPattern()
+                        self.movement_patterns[key].__dict__.update(pattern)
+                    for key, pattern in self.resource_preferences.items():
+                        self.resource_preferences[key] = GameplayPattern()
+                        self.resource_preferences[key].__dict__.update(pattern)
+                    for key, pattern in self.combat_patterns.items():
+                        self.combat_patterns[key] = GameplayPattern()
+                        self.combat_patterns[key].__dict__.update(pattern)
                 self.logger.info("Loaded learned patterns from file")
 
         except ImportError:
@@ -107,13 +137,17 @@ class GameplayLearner:
         if not self.is_learning:
             return
 
-        action = GameplayAction(
-            action_type=action_type,
-            timestamp=time.time(),
-            position=position,
-            **kwargs
-        )
-        self.recorded_actions.append(action)
+        try:
+            action = GameplayAction(
+                action_type=action_type,
+                timestamp=time.time(),
+                position=position,
+                **{k: v for k, v in kwargs.items() if k in GameplayAction.__dataclass_fields__}
+            )
+            self.recorded_actions.append(action)
+            self.logger.debug(f"Recorded action: {action_type} at {position}")
+        except Exception as e:
+            self.logger.error(f"Error recording action: {str(e)}")
 
     def _analyze_patterns(self):
         """Analyze recorded actions to learn patterns"""
@@ -276,9 +310,9 @@ class GameplayLearner:
         """Save learned patterns to file"""
         try:
             patterns = {
-                'movement': self.movement_patterns,
-                'resources': self.resource_preferences,
-                'combat': self.combat_patterns
+                'movement': {k: v.to_dict() for k, v in self.movement_patterns.items()},
+                'resources': {k: v.to_dict() for k, v in self.resource_preferences.items()},
+                'combat': {k: v.to_dict() for k, v in self.combat_patterns.items()}
             }
 
             pattern_file = Path("models/learned_patterns.json")
