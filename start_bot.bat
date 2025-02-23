@@ -25,17 +25,18 @@ if not exist "venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-REM Activate virtual environment and start the bot
+REM Activate virtual environment
 call venv\Scripts\activate.bat
-if %errorLevel% == 0 (
-    python fishing_bot.py
-    if %errorLevel% neq 0 (
-        echo Error running fishing_bot.py
-        pause
-        exit /b 1
-    )
-) else (
+if errorlevel 1 (
     echo Failed to activate virtual environment
+    pause
+    exit /b 1
+)
+
+REM Start the bot
+python fishing_bot.py
+if errorlevel 1 (
+    echo Error running fishing_bot.py
     pause
     exit /b 1
 )

@@ -36,17 +36,23 @@ python -m pip install --upgrade pip
 if errorlevel 1 goto error
 
 echo.
-echo Installing required packages...
-echo This might take a few minutes...
-
-REM Create and activate virtual environment
 echo Creating virtual environment...
 python -m venv venv
-call venv\Scripts\activate
 if errorlevel 1 (
-    echo Error: Failed to create virtual environment
+    echo Failed to create virtual environment
     goto error
 )
+
+echo Activating virtual environment...
+call venv\Scripts\activate.bat
+if errorlevel 1 (
+    echo Failed to activate virtual environment
+    goto error
+)
+
+echo.
+echo Installing required packages...
+echo This might take a few minutes...
 
 echo Installing Win32GUI...
 pip install pywin32
