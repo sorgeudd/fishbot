@@ -22,6 +22,7 @@ class FishingBot:
         self.np = None
         self.ImageGrab = None
         self.win32gui = None
+        self.win32process = None # Added for process ID retrieval
 
         self._init_dependencies()
         self._init_ai_components()
@@ -60,12 +61,14 @@ class FishingBot:
             import numpy as np
             from PIL import ImageGrab
             import win32gui
+            import win32process # Added for process ID retrieval
 
             self.pyautogui = pyautogui
             self.cv2 = cv2
             self.np = np
             self.ImageGrab = ImageGrab
             self.win32gui = win32gui
+            self.win32process = win32process # Added for process ID retrieval
 
             # Configure PyAutoGUI safety settings
             self.pyautogui.FAILSAFE = True
@@ -107,20 +110,51 @@ class FishingBot:
         }
 
     def find_game_window(self, window_title=None):
-        """Find game window by title"""
+        """Find game window by title
+
+        Args:
+            window_title (str): Full or partial window title to match. If None, 
+                              will try to find any game window from common titles.
+
+        Returns:
+            tuple: (success, message)
+                - success (bool): True if window was found
+                - message (str): Status message or error details
+        """
         if self.test_mode:
             self.window_handle = 1
             self.window_rect = (0, 0, 800, 600)
-            return True
+            return True, "Test mode: Using mock window"
 
         try:
-            if window_title:
-                self.config['window_title'] = window_title
+            if not window_title:
+                # Common game window titles to try
+                common_titles = [
+                    "RuneScape", "World of Warcraft", "OSRS", 
+                    "Final Fantasy XIV", "Black Desert", "Lost Ark"
+                ]
+                for title in common_titles:
+                    found = self._find_window_by_title(title)
+                    if found:
+                        return True, f"Found game window: {title}"
+                return False, "No supported game window found"
 
+            found = self._find_window_by_title(window_title)
+            if found:
+                return True, f"Found specific window: {window_title}"
+            return False, f"Window '{window_title}' not found"
+
+        except Exception as e:
+            self.logger.error(f"Error finding game window: {str(e)}")
+            return False, f"Error: {str(e)}"
+
+    def _find_window_by_title(self, title):
+        """Helper method to find window by title"""
+        try:
             def callback(hwnd, extra):
                 if self.win32gui.IsWindowVisible(hwnd):
                     window_text = self.win32gui.GetWindowText(hwnd)
-                    if window_title in window_text:
+                    if title.lower() in window_text.lower():
                         self.window_handle = hwnd
                         self.window_rect = self.win32gui.GetWindowRect(hwnd)
                         return False
@@ -129,15 +163,127 @@ class FishingBot:
             self.win32gui.EnumWindows(callback, None)
 
             if self.window_handle:
+                # Get additional window info
+                self.window_placement = self.win32gui.GetWindowPlacement(self.window_handle)
+                self.window_style = self.win32gui.GetWindowLong(self.window_handle, -16)  # GWL_STYLE
+
+                # Update config
                 self.config['game_window'] = self.window_rect
-                self.logger.info(f"Found game window: {self.window_rect}")
+                self.config['window_title'] = title
+
+                # Log window details
+                self.logger.info(f"Found window '{title}' at {self.window_rect}")
+                self.logger.debug(f"Window handle: {self.window_handle}")
+                self.logger.debug(f"Window placement: {self.window_placement}")
+
                 return True
 
-            self.logger.warning(f"Game window '{window_title}' not found")
             return False
 
         except Exception as e:
-            self.logger.error(f"Error finding game window: {str(e)}")
+            self.logger.error(f"Error in _find_window_by_title: {str(e)}")
+            return False
+
+    def get_window_info(self):
+        """Get detailed information about the current game window"""
+        if not self.window_handle:
+            return None
+
+        try:
+            info = {
+                'title': self.win32gui.GetWindowText(self.window_handle),
+                'rect': self.window_rect,
+                'is_visible': self.win32gui.IsWindowVisible(self.window_handle),
+                'is_active': self.is_window_active(),
+                'placement': self.window_placement if hasattr(self, 'window_placement') else None
+            }
+
+            # Get process info
+            if hasattr(self, 'win32process'):
+                try:
+                    _, pid = self.win32process.GetWindowThreadProcessId(self.window_handle)
+                    info['process_id'] = pid
+                except:
+                    info['process_id'] = None
+
+            return info
+
+        except Exception as e:
+            self.logger.error(f"Error getting window info: {str(e)}")
+            return None
+
+    def load_map_data(self, map_file):
+        """Load map data from file for navigation
+
+        Args:
+            map_file (str): Path to map data file (JSON, CSV, etc.)
+
+        Returns:
+            bool: True if map was loaded successfully
+        """
+        try:
+            import json
+            import csv
+
+            # Handle different file formats
+            if map_file.endswith('.json'):
+                with open(map_file, 'r') as f:
+                    map_data = json.load(f)
+                    self.pathfinder.load_map(map_data)
+                    self.logger.info(f"Loaded JSON map data from {map_file}")
+                    return True
+
+            elif map_file.endswith('.csv'):
+                with open(map_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    map_data = list(reader)
+                    self.pathfinder.load_map(map_data)
+                    self.logger.info(f"Loaded CSV map data from {map_file}")
+                    return True
+
+            else:
+                self.logger.error(f"Unsupported map file format: {map_file}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error loading map data: {str(e)}")
+            return False
+
+    def download_map_data(self, url):
+        """Download map data from URL
+
+        Args:
+            url (str): URL to map data file
+
+        Returns:
+            bool: True if map was downloaded and loaded successfully
+        """
+        try:
+            import requests
+            import tempfile
+            import os
+
+            # Download map file
+            response = requests.get(url)
+            if response.status_code != 200:
+                self.logger.error(f"Failed to download map data: {response.status_code}")
+                return False
+
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(response.content)
+                tmp_path = tmp.name
+
+            # Load the downloaded map
+            success = self.load_map_data(tmp_path)
+
+            # Cleanup temp file
+            os.unlink(tmp_path)
+
+            return success
+
+        except Exception as e:
+            self.logger.error(f"Error downloading map data: {str(e)}")
             return False
 
     def set_window_region(self, region):
@@ -762,7 +908,7 @@ class FishingBot:
 
                     if not bite_detected:
                         self.record_action('timeout', current_state['position'], success=False)
-                        self.logger.debug("Recording timeout action")
+                        self.logger.debug(""Recording timeout action")
 
                 else:
                     # Regular fishing bot behavior

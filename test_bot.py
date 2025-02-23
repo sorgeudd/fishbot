@@ -4,23 +4,37 @@ from mock_environment import create_test_environment
 from bot_core import FishingBot
 import logging
 import time
+import tempfile
+import json
+import os
 
 class TestFishingBot(unittest.TestCase):
     def setUp(self):
         """Setup test environment"""
         logging.basicConfig(level=logging.DEBUG)
+        self.logger = logging.getLogger(__name__)
         self.mock_env = create_test_environment()
         self.mock_env.start_simulation()
         self.bot = FishingBot(test_mode=True, test_env=self.mock_env)
 
     def tearDown(self):
         """Cleanup test environment"""
-        if hasattr(self, 'bot'):
-            if self.bot.running:
-                self.bot.stop()
-            if self.bot.learning_mode:
-                self.bot.stop_learning_mode()
-        self.mock_env.stop_simulation()
+        try:
+            if hasattr(self, 'bot'):
+                if self.bot.running:
+                    self.logger.info("Stopping bot in tearDown")
+                    self.bot.stop()
+                    if self.bot.bot_thread:
+                        self.bot.bot_thread.join(timeout=2.0)  # Add timeout
+                if self.bot.learning_mode:
+                    self.logger.info("Stopping learning mode in tearDown")
+                    self.bot.stop_learning_mode()
+            if hasattr(self, 'mock_env'):
+                self.logger.info("Stopping mock environment in tearDown")
+                self.mock_env.stop_simulation()
+        except Exception as e:
+            self.logger.error(f"Error in tearDown: {str(e)}")
+            raise
 
     def test_learning_mode(self):
         """Test gameplay learning functionality"""
@@ -69,7 +83,7 @@ class TestFishingBot(unittest.TestCase):
 
         # Verify bite detection triggered reel action
         events_after_bite = [e for e in self.mock_env.input_events[initial_events:] 
-                         if e['type'] == 'key_press' and e['key'] == 'r']
+                             if e['type'] == 'key_press' and e['key'] == 'r']
         self.assertGreater(len(events_after_bite), 0, "No reeling occurred after bite")
 
         # Clear bite state
@@ -102,7 +116,7 @@ class TestFishingBot(unittest.TestCase):
         # Stop bot and verify adaptive actions occurred
         self.bot.stop()
         self.assertTrue(len(self.mock_env.input_events) > initial_events, 
-                       "No adaptive actions occurred")
+                        "No adaptive actions occurred")
 
     def test_fish_detection(self):
         """Test fish bite detection"""
@@ -121,12 +135,25 @@ class TestFishingBot(unittest.TestCase):
         self.assertTrue(self.bot.check_combat_status())
         self.assertEqual(self.bot.get_current_health(), 80.0)
 
+        # Set a timeout for combat handling
+        start_time = time.time()
+        max_combat_duration = 5.0  # Maximum time to wait for combat
+
         # Test combat handling
         self.bot._handle_combat()
+
+        # Verify combat didn't take too long
+        combat_duration = time.time() - start_time
+        self.assertLess(combat_duration, max_combat_duration, 
+                        f"Combat handling took too long: {combat_duration:.1f}s")
 
         # Verify combat actions were taken
         combat_events = [e for e in self.mock_env.input_events if e['type'] == 'key_press']
         self.assertGreater(len(combat_events), 0, "No combat abilities used")
+
+        # Verify combat ended
+        self.mock_env.set_game_state(is_in_combat=False)
+        self.assertFalse(self.bot.check_combat_status(), "Combat state not cleared")
 
     def test_initialization(self):
         """Test bot initialization"""
@@ -207,6 +234,62 @@ class TestFishingBot(unittest.TestCase):
         # Test screenshot capture
         screenshot = self.bot.get_window_screenshot()
         self.assertIsNotNone(screenshot)
+
+    def test_window_detection_improved(self):
+        """Test improved window detection functionality"""
+        # Test with specific title
+        success, message = self.bot.find_game_window("Test Game")
+        self.assertTrue(success)
+        self.assertIn("Found specific window", message)
+
+        # Get window info
+        window_info = self.bot.get_window_info()
+        self.assertIsNotNone(window_info)
+        self.assertEqual(window_info['rect'], (0, 0, 800, 600))  # Test mode dimensions
+
+        # Test with unknown title
+        success, message = self.bot.find_game_window("NonexistentGame")
+        self.assertFalse(success)
+        self.assertIn("not found", message)
+
+    def test_map_functionality(self):
+        """Test map loading and navigation features"""
+        import tempfile
+        import json
+        import os
+
+        # Create a test map file
+        test_map = {
+            'nodes': [
+                {'id': 1, 'x': 100, 'y': 100, 'type': 'resource', 'resource': 'fish'},
+                {'id': 2, 'x': 200, 'y': 200, 'type': 'resource', 'resource': 'ore'},
+                {'id': 3, 'x': 150, 'y': 150, 'type': 'path'}
+            ],
+            'edges': [
+                {'from': 1, 'to': 3},
+                {'from': 3, 'to': 2}
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+            json.dump(test_map, tmp)
+            tmp_path = tmp.name
+
+        try:
+            # Test loading from file
+            success = self.bot.load_map_data(tmp_path)
+            self.assertTrue(success)
+
+            # Test navigation with loaded map
+            self.bot.navigate_to((200, 200))  # Should use loaded map data
+
+            # Verify navigation events
+            nav_events = [e for e in self.mock_env.input_events 
+                         if e['type'] in ('mouse_move', 'key_press')]
+            self.assertGreater(len(nav_events), 0)
+
+        finally:
+            os.unlink(tmp_path)
 
 
 if __name__ == '__main__':

@@ -22,10 +22,15 @@ class GameState:
     last_action_time: float = None  # Track timing of last action
 
     def __post_init__(self):
+        if self.detected_resources is None:
+            self.detected_resources = []
+        if self.detected_obstacles is None:
+            self.detected_obstacles = []
         if self.screen_content is None:
             # Create a mock screen content (black screen)
             self.screen_content = np.zeros((600, 800, 3), dtype=np.uint8)
         self.last_action_time = time.time()
+        self.combat_start_time = time.time()
 
 class MockEnvironment:
     def __init__(self):
@@ -34,7 +39,7 @@ class MockEnvironment:
         self.input_events = []
         self.fish_bite_event = Event()
         self.running = False
-        self.min_action_interval = 0.5  # Minimum time between actions
+        self.min_action_interval = 0.1  # Reduced for testing
 
         # Initialize mock screen
         self.window_size = (800, 600)
@@ -67,16 +72,16 @@ class MockEnvironment:
                 if bite_cooldown <= 0 and random.random() < 0.3:  # 30% chance per cycle
                     self.state.fish_bite_active = True
                     self.fish_bite_event.set()
-                    time.sleep(0.5)
+                    time.sleep(0.1)  # Reduced for testing
                     self.state.fish_bite_active = False
                     self.fish_bite_event.clear()
-                    bite_cooldown = 2.0  # 2 second cooldown
+                    bite_cooldown = 0.5  # Reduced for testing
                 else:
                     bite_cooldown = max(0, bite_cooldown - 0.1)
 
                 # Handle combat timeout
                 if self.state.is_in_combat and self.state.combat_start_time:
-                    if current_time - self.state.combat_start_time > 5.0:
+                    if current_time - self.state.combat_start_time > 2.0:  # Reduced for testing
                         self.state.is_in_combat = False
                         self.state.combat_start_time = None
                         self.logger.debug("Combat timeout reached, ending combat")
@@ -92,11 +97,10 @@ class MockEnvironment:
                 self._update_mock_screen()
                 self.state.last_action_time = current_time
 
-            time.sleep(0.1)  # Reduce CPU usage
+            time.sleep(0.05)  # Reduced CPU usage while maintaining responsiveness
 
     def _update_mock_screen(self):
         """Update mock screen content"""
-        # Create some random visual elements
         screen = np.zeros((*self.window_size, 3), dtype=np.uint8)
 
         # Add random elements (e.g., resources, obstacles)
@@ -137,8 +141,8 @@ class MockEnvironment:
             'health': self.state.health,
             'current_position': self.state.current_position,
             'in_combat': self.state.is_in_combat,
-            'resources': self.state.detected_resources or [],
-            'obstacles': self.state.detected_obstacles or [],
+            'resources': self.state.detected_resources,
+            'obstacles': self.state.detected_obstacles,
             'fish_bite_active': self.state.fish_bite_active,
             'screen_content': self.state.screen_content
         }
@@ -151,10 +155,11 @@ class MockEnvironment:
                 setattr(self.state, key, value)
                 if key == 'is_in_combat' and value:
                     self.state.combat_start_time = current_time
-                elif key == 'fish_bite_active' and value:
-                    self.fish_bite_event.set()
-                else:
-                    self.fish_bite_event.clear()
+                elif key == 'fish_bite_active':
+                    if value:
+                        self.fish_bite_event.set()
+                    else:
+                        self.fish_bite_event.clear()
         self.logger.info(f"Updated game state: {kwargs}")
         self.state.last_action_time = current_time
 
