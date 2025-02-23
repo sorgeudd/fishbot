@@ -16,38 +16,15 @@ class FishingBot:
         self.test_mode = test_mode
         self.test_env = test_env
 
-        # Only import GUI dependencies when needed
+        # Only import Windows dependencies when needed
         self.pyautogui = None
         self.cv2 = None
         self.np = None
         self.ImageGrab = None
         self.win32gui = None
 
-        if not test_mode:
-            # Regular Windows environment setup
-            if platform.system() != 'Windows':
-                self.logger.error("This bot only works on Windows operating system")
-                raise SystemError("FishingBot requires Windows to run")
-
-            # Import Windows-specific dependencies
-            try:
-                import pyautogui
-                import cv2
-                import numpy as np
-                from PIL import ImageGrab
-                import win32gui
-                self.pyautogui = pyautogui
-                self.cv2 = cv2
-                self.np = np
-                self.ImageGrab = ImageGrab
-                self.win32gui = win32gui
-
-                # Configure PyAutoGUI safety settings
-                self.pyautogui.FAILSAFE = True
-                self.pyautogui.PAUSE = 0.1
-            except ImportError as e:
-                self.logger.error(f"Failed to import required modules: {str(e)}")
-                raise ImportError("Missing required modules")
+        self._init_dependencies()
+        self._init_ai_components()
 
         self.running = False
         self.stop_event = Event()
@@ -55,9 +32,6 @@ class FishingBot:
         self.emergency_stop = False
         self.window_handle = None
         self.window_rect = None
-
-        # Initialize AI components
-        self._init_ai_components()
 
         # Initialize pathfinding
         self.pathfinder = PathFinder(grid_size=32)
@@ -68,7 +42,42 @@ class FishingBot:
         self.learning_mode = False
         self.adaptive_mode = False
 
-        # Default configuration
+        # Load default configuration
+        self._load_default_config()
+
+    def _init_dependencies(self):
+        """Initialize Windows-specific dependencies"""
+        if self.test_mode:
+            return
+
+        if platform.system() != 'Windows':
+            self.logger.error("This bot only works on Windows operating system")
+            raise SystemError("FishingBot requires Windows to run")
+
+        try:
+            import pyautogui
+            import cv2
+            import numpy as np
+            from PIL import ImageGrab
+            import win32gui
+
+            self.pyautogui = pyautogui
+            self.cv2 = cv2
+            self.np = np
+            self.ImageGrab = ImageGrab
+            self.win32gui = win32gui
+
+            # Configure PyAutoGUI safety settings
+            self.pyautogui.FAILSAFE = True
+            self.pyautogui.PAUSE = 0.1
+
+            self.logger.info("Successfully initialized Windows dependencies")
+        except ImportError as e:
+            self.logger.error(f"Failed to import required modules: {str(e)}")
+            raise ImportError(f"Missing required module: {str(e)}")
+
+    def _load_default_config(self):
+        """Load default configuration"""
         self.config = {
             'detection_area': (0, 0, 100, 100),
             'detection_threshold': 0.8,
@@ -220,7 +229,6 @@ class FishingBot:
 
             self.vision_system = VisionSystem()
             self.logger.info("Vision system initialized")
-
         except Exception as e:
             self.logger.error(f"Failed to initialize AI components: {str(e)}")
             self.config['use_ai'] = False
