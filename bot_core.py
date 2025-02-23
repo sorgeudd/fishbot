@@ -874,7 +874,6 @@ class FishingBot:
                 area = self.cv2.contourArea(contour) if self.cv2 else 0
                 if area > 100:  # Minimum area threshold
                     return True
-
             return False
 
         except Exception as e:
@@ -1011,6 +1010,42 @@ class FishingBot:
         self.stop()
         self.logger.warning("Emergency stop activated")
 
+    def start_learning(self):
+        """Start learning mode to capture user actions"""
+        try:
+            if not self.window_handle and not self.test_mode:
+                self.logger.error("Cannot start learning - no game window detected")
+                return False
+
+            self.learning_mode = True
+            self.gameplay_learner.start_learning()  # Start the gameplay learner
+            self.logger.info("Learning mode started - Now recording user actions")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error starting learning mode: {str(e)}")
+            return False
+
+    def stop_learning(self):
+        """Stop learning mode and save learned patterns"""
+        try:
+            if not self.learning_mode:
+                self.logger.debug("Learning mode was not active")
+                return True
+
+            self.learning_mode = False
+            # Save learned patterns
+            success = self.gameplay_learner.save_patterns()
+            if success:
+                self.logger.info("Learning mode stopped, patterns saved successfully")
+            else:
+                self.logger.warning("Learning mode stopped but failed to save patterns")
+            return success
+
+        except Exception as e:
+            self.logger.error(f"Error stopping learning mode: {str(e)}")
+            return False
+
     def start_learning_mode(self):
         """Start recording player actions to learn patterns"""
         self.learning_mode = True
@@ -1030,7 +1065,6 @@ class FishingBot:
         """Stop learning mode and analyze patterns"""
         if not self.learning_mode:
             return
-
         self.learning_mode = False
         self.gameplay_learner.stop_learning()
         self.logger.info("Stopped learning mode and analyzed patterns")

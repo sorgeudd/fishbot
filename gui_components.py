@@ -24,7 +24,9 @@ class MainWindow:
 
             # Configure main window
             self.master.title("Fishing Bot")
-            self.master.resizable(False, False)
+            self.master.resizable(True, True)  # Make window resizable
+            self.master.minsize(400, 800)  # Set minimum size
+            self.master.geometry("400x800")  # Set default size to be taller and less wide
             self.logger.debug("Main window configured")
 
             self._create_styles()
@@ -212,20 +214,31 @@ class MainWindow:
         try:
             if not self.bot.learning_mode:
                 self.logger.info("Starting learning mode")
-                self.bot.start_learning()
-                self.learning_btn.config(text="Stop Learning")
-                self.learning_status.config(text="Learning: Active")
-                self.status_label.config(text="Learning Mode")
-                self.start_bot_btn.config(state="disabled")
+                success = self.bot.start_learning()
+                if success:
+                    self.logger.info("Successfully started learning mode")
+                    self.learning_btn.config(text="Stop Learning")
+                    self.learning_status.config(text="Learning: Active")
+                    self.status_label.config(text="Learning Mode")
+                    self.start_bot_btn.config(state="disabled")
+                else:
+                    self.logger.error("Failed to start learning mode")
+                    messagebox.showerror("Error", "Failed to start learning mode")
             else:
                 self.logger.info("Stopping learning mode")
-                self.bot.stop_learning()
-                self.learning_btn.config(text="Start Learning")
-                self.learning_status.config(text="Learning: Inactive")
-                self.status_label.config(text="Idle")
-                self.start_bot_btn.config(state="normal")
+                success = self.bot.stop_learning()
+                if success:
+                    self.logger.info("Successfully stopped learning mode")
+                    self.learning_btn.config(text="Start Learning")
+                    self.learning_status.config(text="Learning: Inactive")
+                    self.status_label.config(text="Idle")
+                    self.start_bot_btn.config(state="normal")
+                else:
+                    self.logger.error("Failed to stop learning mode")
+                    messagebox.showerror("Error", "Failed to stop learning mode")
         except Exception as e:
             self.logger.error(f"Error toggling learning mode: {str(e)}")
+            messagebox.showerror("Error", f"Error toggling learning mode: {str(e)}")
 
     def _register_emergency_stop(self):
         """Register emergency stop hotkey"""
