@@ -1,0 +1,9 @@
+{
+    "detection_area": [0, 0, 100, 100],
+    "detection_threshold": 0.8,
+    "cast_key": "f",
+    "reel_key": "r",
+    "color_threshold": [200, 200, 200],
+    "auto_start": false,
+    "log_level": "INFO"
+}

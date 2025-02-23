@@ -1,4 +1,3 @@
-"""Main entry point for the fishing bot application"""
 import tkinter as tk
 from tkinter import ttk
 from gui_components import MainWindow
@@ -25,8 +24,8 @@ def main():
         root.title("Fishing Bot")
 
         # Set a larger window size to better accommodate all components
-        root.geometry("500x1000")  # Increased height to 1000px
-        logger.debug("Created main window with geometry 500x1000")
+        root.geometry("500x800")
+        logger.debug("Created main window with geometry 500x800")
 
         # Create a custom style for the emergency stop button
         style = ttk.Style()
