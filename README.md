@@ -28,14 +28,30 @@ pip install numpy opencv-python pillow pyaudio pyautogui requests
    - Double click on `start_bot.bat`, OR
    - Run `python fishing_bot.py` in terminal
 2. Configure the detection area and key bindings in the GUI
-3. Click "Start" to begin fishing
-4. Click "Stop" to pause the bot
+3. Start learning mode:
+   - Click "Start Learning"
+   - Perform the fishing actions you want the bot to learn
+   - Click "Stop Learning" when done
+4. Click "Start Bot" to begin automated fishing
+5. Click "Stop" to pause the bot
 
 ## Configuration
 
 - Detection Area: The screen region to monitor for fish bites (format: x,y,width,height)
 - Cast Key: The key to press for casting the fishing line (default: 'f')
 - Reel Key: The key to press for reeling in fish (default: 'r')
+
+## Game Window Detection
+
+1. Enter the game window title (or leave blank for auto-detection)
+2. Click "Detect Window" to find and focus the game window
+3. The bot will automatically track the selected window
+
+## Map Management
+
+- Load local map files (JSON or CSV format)
+- Download maps from URLs for navigation and resource locations
+- Maps are used for pathfinding and resource detection
 
 ## Testing
 
