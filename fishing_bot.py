@@ -23,9 +23,9 @@ def main():
         root = tk.Tk()
         root.title("Fishing Bot")
 
-        # Set a fixed window size
-        root.geometry("300x600")
-        logger.debug("Created main window with geometry 300x600")
+        # Set a larger window size to better accommodate all components
+        root.geometry("500x800")
+        logger.debug("Created main window with geometry 500x800")
 
         # Create a custom style for the emergency stop button
         style = ttk.Style()
