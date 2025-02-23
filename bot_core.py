@@ -6,10 +6,11 @@ import time
 import sys
 from pathlib import Path
 import random
-from vision_system import VisionSystem
-from pathfinding import PathFinder
-from gameplay_learner import GameplayLearner
-import torch # Added for AI model usage
+import json
+import pyaudio
+import wave
+import numpy as np
+from collections import deque
 
 class FishingBot:
     def __init__(self, test_mode=False, test_env=None):
@@ -47,6 +48,32 @@ class FishingBot:
 
         # Load default configuration
         self._load_default_config()
+
+        # Add new functionality for macros
+        self.macros = {}
+        self.current_macro = None
+        self.recording_macro = False
+        self.macro_actions = []
+
+        # Sound trigger system
+        self.sound_triggers = {}
+        self.audio_threshold = 0.1
+        self.audio_sample_rate = 44100
+        self.audio_chunk_size = 1024
+        self.audio_format = pyaudio.paFloat32
+        self.audio_channels = 1
+
+        # Initialize audio if not in test mode
+        if not test_mode:
+            try:
+                self.audio = pyaudio.PyAudio()
+                self.audio_stream = None
+            except Exception as e:
+                self.logger.warning(f"Could not initialize audio: {e}")
+                self.audio = None
+
+        self._load_macros() #load macros on init
+
 
     def _init_dependencies(self):
         """Initialize dependencies based on platform"""
@@ -669,12 +696,13 @@ class FishingBot:
             return [], []
 
     def move_mouse_to(self, x, y, duration=None):
-        """Move mouse with test mode support and window coordinate translation"""
+        """Move mouse with enhanced control and window coordinate translation"""
         try:
             if duration is None:
                 duration = self.config['mouse_movement_speed']
 
             if self.test_mode:
+                self.record_action('mouse_move', x=x, y=y)
                 return self.test_env.move_mouse(x, y)
 
             if not self.window_handle or not self.window_rect:
@@ -687,35 +715,40 @@ class FishingBot:
             target_y = window_y + y
 
             if self.pyautogui:
-                # Add slight randomization to prevent detection
+                # Add slight randomization
                 target_x += random.uniform(-2, 2)
                 target_y += random.uniform(-2, 2)
 
-                # Ensure window is active before moving mouse
+                # Ensure window is active
                 if not self.is_window_active():
                     self.activate_window()
-                    time.sleep(0.1)  # Wait for window activation
+                    time.sleep(0.1)
 
-                # Move mouse with bezier curve for more natural movement
+                # Get current position
                 current_x, current_y = self.pyautogui.position()
+
+                # Generate smooth path
                 points = self._generate_bezier_curve(
-                    current_x, current_y, 
+                    current_x, current_y,
                     target_x, target_y,
                     num_points=20
                 )
 
                 # Move through points
                 for point_x, point_y in points:
-                    self.pyautogui.moveTo(point_x, point_y, duration/len(points))
                     if self.stop_event.is_set():
                         return False
+                    self.pyautogui.moveTo(point_x, point_y, 
+                                        duration/len(points))
 
+                # Record action if recording macro
+                self.record_action('mouse_move', x=x, y=y)
                 self.logger.debug(f"Moved mouse to ({target_x}, {target_y})")
                 return True
             return False
 
         except Exception as e:
-            self.logger.error(f"Mouse movement error: {str(e)}")
+            self.logger.error(f"Mouse movement error: {e}")
             return False
 
     def _generate_bezier_curve(self, x1, y1, x2, y2, num_points=20):
@@ -752,6 +785,7 @@ class FishingBot:
                 interval = self.config['double_click_interval']
 
             if self.test_mode:
+                self.record_action('click', x=x, y=y, button=button, clicks=clicks)
                 return self.test_env.click(button, clicks)
 
             if self.pyautogui:
@@ -764,6 +798,7 @@ class FishingBot:
                 time.sleep(random.uniform(0, 0.1))
 
                 self.pyautogui.click(clicks=clicks, interval=interval, button=button)
+                self.record_action('click', x=x, y=y, button=button, clicks=clicks)
                 self.logger.debug(f"Clicked at current position, button={button}, clicks={clicks}")
                 return True
             return False
@@ -776,6 +811,7 @@ class FishingBot:
         """Press key with test mode support"""
         try:
             if self.test_mode:
+                self.record_action('key', key=key, duration=duration)
                 return self.test_env.press_key(key, duration)
 
             if self.pyautogui:
@@ -785,6 +821,7 @@ class FishingBot:
                     self.pyautogui.keyUp(key)
                 else:
                     self.pyautogui.press(key)
+                self.record_action('key', key=key, duration=duration)
                 self.logger.debug(f"Pressed key: {key}, duration: {duration}")
                 return True
             return False
@@ -1001,6 +1038,8 @@ class FishingBot:
             self.emergency_stop = False
             self.bot_thread = None
             self.stop_event.clear()
+            if self.audio_stream:
+                self.stop_sound_monitoring()
 
         except Exception as e:
             self.logger.error(f"Error stopping bot: {str(e)}")
@@ -1079,11 +1118,13 @@ class FishingBot:
         self.learning_mode = False
         self.logger.info("Started adaptive gameplay mode")
 
-    def record_action(self, action_type, position, **kwargs):
+    def record_action(self, action_type, position=None, **kwargs):
         """Record player action during learning mode"""
         if self.learning_mode:
             self.gameplay_learner.record_action(action_type, position, **kwargs)
             self.logger.debug(f"Recorded action: {action_type} at {position}")
+        elif self.recording_macro:
+            self.record_action(action_type, position, **kwargs)
 
     def get_next_action(self):
         """Get next optimal action based on learned patterns"""
@@ -1193,3 +1234,403 @@ class FishingBot:
 
         except Exception as e:
             self.logger.error(f"Error in environment scanning: {str(e)}")
+
+    def start_macro_recording(self, macro_name):
+        """Start recording a new macro"""
+        try:
+            if self.recording_macro:
+                self.logger.warning("Already recording a macro")
+                return False
+
+            self.recording_macro = True
+            self.current_macro = macro_name
+            self.macro_actions = []
+            self.logger.info(f"Started recording macro: {macro_name}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error starting macro recording: {e}")
+            return False
+
+    def stop_macro_recording(self):
+        """Stop recording the current macro"""
+        try:
+            if not self.recording_macro:
+                return False
+
+            self.macros[self.current_macro] = self.macro_actions.copy()
+            self.recording_macro = False
+            self.current_macro = None
+            self.macro_actions = []
+
+            # Save macros to file
+            self._save_macros()
+            self.logger.info("Stopped macro recording and saved")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error stopping macro recording: {e}")
+            return False
+
+    def _save_macros(self):
+        """Save macros to file"""
+        try:
+            macro_file = Path("models/macros.json")
+            macro_file.parent.mkdir(exist_ok=True)
+
+            with open(macro_file, 'w') as f:
+                json.dump(self.macros, f, indent=2)
+            self.logger.debug("Saved macros to file")
+        except Exception as e:
+            self.logger.error(f"Error saving macros: {e}")
+
+    def _load_macros(self):
+        """Load macros from file"""
+        try:
+            macro_file = Path("models/macros.json")
+            if macro_file.exists():
+                with open(macro_file, 'r') as f:
+                    self.macros = json.load(f)
+                self.logger.info(f"Loaded {len(self.macros)} macros")
+        except Exception as e:
+            self.logger.error(f"Error loading macros: {e}")
+
+    def play_macro(self, macro_name):
+        """Play back a recorded macro"""
+        if macro_name not in self.macros:
+            self.logger.error(f"Macro '{macro_name}' not found")
+            return False
+
+        try:
+            actions = self.macros[macro_name]
+            for action in actions:
+                if self.stop_event.is_set():
+                    break
+
+                action_type = action['type']
+                if action_type == 'mouse_move':
+                    self.move_mouse_to(action['x'], action['y'])
+                elif action_type == 'click':
+                    self.click(action['x'], action['y'], 
+                             button=action.get('button', 'left'),
+                             clicks=action.get('clicks', 1))
+                elif action_type == 'key':
+                    self.press_key(action['key'], 
+                                 duration=action.get('duration', None))
+
+                # Wait specified delay
+                time.sleep(action.get('delay', 0.1))
+
+            return True
+        except Exception as e:
+            self.logger.error(f"Error playing macro: {e}")
+            return False
+
+    def record_action(self, action_type, **kwargs):
+        """Record an action for the current macro"""
+        if not self.recording_macro:
+            return
+
+        action = {'type': action_type, **kwargs,
+                 'timestamp': time.time()}
+        self.macro_actions.append(action)
+        self.logger.debug(f"Recorded action: {action}")
+
+    def add_sound_trigger(self, name, sound_file, action, threshold=0.1):
+        """Add a sound trigger that executes an action when matched"""
+        try:
+            # Load sound file
+            with wave.open(sound_file, 'rb') as wf:
+                audio_data = wf.readframes(wf.getnframes())
+                audio_data = np.frombuffer(audio_data, dtype=np.float32)
+
+            self.sound_triggers[name] = {
+                'pattern': audio_data,
+                'action': action,
+                'threshold': threshold
+            }
+            self.logger.info(f"Added sound trigger: {name}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error adding sound trigger: {e}")
+            return False
+
+    def start_sound_monitoring(self):
+        """Start monitoring audio for sound triggers"""
+        if not self.audio:
+            self.logger.error("Audio not initialized")
+            return False
+
+        try:
+            def audio_callback(in_data, frame_count, time_info, status):
+                if status:
+                    self.logger.warning(f"Audio status: {status}")
+
+                # Convert input to numpy array
+                audio_data = np.frombuffer(in_data, dtype=np.float32)
+
+                # Check each trigger
+                for name, trigger in self.sound_triggers.items():
+                    if self._match_audio_pattern(audio_data, 
+                                               trigger['pattern'],
+                                               trigger['threshold']):
+                        # Execute the triggered action
+                        Thread(target=trigger['action']).start()
+                        self.logger.info(f"Sound trigger activated: {name}")
+
+                return (in_data, pyaudio.paContinue)
+
+            # Start audio stream
+            self.audio_stream = self.audio.open(
+                format=self.audio_format,
+                channels=self.audio_channels,
+                rate=self.audio_sample_rate,
+                input=True,
+                frames_per_buffer=self.audio_chunk_size,
+                stream_callback=audio_callback
+            )
+
+            self.audio_stream.start_stream()
+            self.logger.info("Started sound monitoring")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error starting sound monitoring: {e}")
+            return False
+
+    def stop_sound_monitoring(self):
+        """Stop monitoring audio"""
+        try:
+            if self.audio_stream:
+                self.audio_stream.stop_stream()
+                self.audio_stream.close()
+                self.audio_stream = None
+            self.logger.info("Stopped sound monitoring")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error stopping sound monitoring: {e}")
+            return False
+
+    def _match_audio_pattern(self, input_data, pattern, threshold):
+        """Match input audio against a stored pattern"""
+        try:
+            # Simple amplitude threshold for now
+            if np.max(np.abs(input_data)) > threshold:
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Error matching audio: {e}")
+            return False
+
+    def import_map(self, map_file):
+        """Import and process map file with resource locations"""
+        try:
+            map_path = Path(map_file)
+            if not map_path.exists():
+                self.logger.error(f"Map file not found: {map_file}")
+                return False
+
+            # Process based on file type
+            if map_path.suffix.lower() == '.json':
+                with open(map_path, 'r') as f:
+                    map_data = json.load(f)
+            else:
+                # Use CV2 to process image map
+                if not self.cv2:
+                    self.logger.error("CV2 not available for map processing")
+                    return False
+
+                # Read map image
+                map_img = self.cv2.imread(str(map_path))
+                if map_img is None:
+                    self.logger.error("Failed to read map image")
+                    return False
+
+                # Process map image to extract resource locations
+                map_data = self._process_map_image(map_img)
+
+            # Update pathfinding with new map data
+            if map_data:
+                self.pathfinder.update_map(map_data)
+                self.logger.info("Successfully imported and processed map")
+                return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Error importing map: {e}")
+            return False
+
+    def _process_map_image(self, map_img):
+        """Process map image to extract resource locations and walkable areas"""
+        try:
+            # Convert to HSV for better color detection
+            hsv = self.cv2.cvtColor(map_img, self.cv2.COLOR_BGR2HSV)
+
+            # Define color ranges for different resources
+            color_ranges = {
+                'fishing_spot': [(100, 150, 100), (140, 255, 255)],  # Blue
+                'tree': [(35, 100, 100), (85, 255, 255)],  # Green
+                'ore': [(0, 100, 100), (20, 255, 255)]  # Brown/Orange
+            }
+
+            resources = {}
+            for resource_type, (lower, upper) in color_ranges.items():
+                # Create color mask
+                lower = np.array(lower)
+                upper = np.array(upper)
+                mask = self.cv2.inRange(hsv, lower, upper)
+
+                # Find contours
+                contours, _ = self.cv2.findContours(
+                    mask, self.cv2.RETR_EXTERNAL, 
+                    self.cv2.CHAIN_APPROX_SIMPLE
+                )
+
+                # Extract locations
+                locations = []
+                for contour in contours:
+                    # Get center point
+                    M = self.cv2.moments(contour)
+                    if M["m00"] != 0:
+                        cx = int(M["m10"] / M["m00"])
+                        cy = int(M["m01"] / M["m00"])
+                        locations.append((cx, cy))
+
+                resources[resource_type] = locations
+
+            # Create walkable area mask (light areas)
+            gray = self.cv2.cvtColor(map_img, self.cv2.COLOR_BGR2GRAY)
+            _, walkable = self.cv2.threshold(
+                gray, 200, 255, self.cv2.THRESH_BINARY
+            )
+
+            # Combine into map data
+            map_data = {
+                'resources': resources,
+                'walkable': walkable.tolist(),
+                'resolution': self.pathfinder.grid_size
+            }
+
+            return map_data
+
+        except Exception as e:
+            self.logger.error(f"Error processing map image: {e}")
+            return None
+
+    def import_training_video(self, video_file):
+        """Import and process training video file with progress updates"""
+        try:
+            video_path = Path(video_file)
+            if not video_path.exists():
+                self.logger.error(f"Video file not found: {video_file}")
+                return False
+
+            if not self.cv2:
+                self.logger.error("CV2 not available for video processing")
+                return False
+
+            # Open video file
+            cap = self.cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                self.logger.error("Failed to open video file")
+                return False
+
+            # Get total frame count for progress tracking
+            total_frames = int(cap.get(self.cv2.CAP_PROP_FRAME_COUNT))
+            self.logger.info(f"Processing video with {total_frames} frames")
+
+            # Start learning mode
+            self.start_learning()
+
+            # Process frames in chunks to prevent freezing
+            frame_count = 0
+            chunk_size = 100  # Process 100 frames at a time
+
+            while cap.isOpened():
+                chunk_start = time.time()
+
+                # Process a chunk of frames
+                for _ in range(chunk_size):
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    # Process frame
+                    self._process_training_frame(frame)
+                    frame_count += 1
+
+                    # Report progress
+                    progress = (frame_count / total_frames) * 100
+                    self.logger.info(f"Processed {frame_count}/{total_frames} frames ({progress:.1f}%)")
+
+                # Small delay between chunks to prevent freezing
+                chunk_time = time.time() - chunk_start
+                if chunk_time < 0.1:  # If chunk processed too quickly
+                    time.sleep(0.1 - chunk_time)  # Add small delay
+
+                if frame_count >= total_frames:
+                    break
+
+            cap.release()
+
+            # Stop learning and save patterns
+            self.stop_learning()
+            self.logger.info(f"Completed video training: {frame_count} frames")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error importing training video: {str(e)}")
+            self.stop_learning()  # Ensure learning mode is stopped
+            return False
+
+    def _process_training_frame(self, frame):
+        """Process a single frame from training video"""
+        try:
+            # Convert frame to format expected by vision system
+            frame_rgb = self.cv2.cvtColor(frame, self.cv2.COLOR_BGR2RGB)
+
+            # Detect objects and activities
+            detections = self.vision_system.detect_objects(frame_rgb)
+
+            # Process each detection
+            for det in detections:
+                if det['class_id'] == 'fishing_action':
+                    self.record_action('fishing', position=det['bbox'][:2])
+                elif det['class_id'] == 'movement':
+                    self.record_action('move', position=det['bbox'][:2])
+                elif det['class_id'] == 'resource_interaction':
+                    self.record_action('gather', position=det['bbox'][:2])
+
+        except Exception as e:
+            self.logger.error(f"Error processing training frame: {e}")
+
+    def load_video(self, video_path):
+        """Load and process video data for AI training"""
+        try:
+            video_path = Path(video_path)
+            if not video_path.exists():
+                self.logger.error(f"Video file not found: {video_path}")
+                return False
+            
+            if not self.cv2:
+                self.logger.error("OpenCV (cv2) is not installed. Cannot load video.")
+                return False
+            
+            cap = self.cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                self.logger.error(f"Could not open video file: {video_path}")
+                return False
+            
+            frames = []
+            while(cap.isOpened()):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+            
+            cap.release()
+            self.logger.info(f"Loaded video with {len(frames)} frames")
+            return frames
+            
+        except Exception as e:
+            self.logger.error(f"Error loading video: {e}")
+            return None

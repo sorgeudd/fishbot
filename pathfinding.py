@@ -40,14 +40,17 @@ class PathFinder:
         """Update map data and process walkable areas
         Args:
             map_data: Dictionary containing map information
-                For PNG maps: {'binary_map': np.array, 'resolution': int}
+                For PNG maps: {'binary_map': List[List[bool]], 'resolution': int}
                 For JSON/CSV: {'nodes': List[Dict], 'edges': List[Dict]}
         """
         try:
             self.map_data = map_data
             if 'binary_map' in map_data:
-                # Process PNG-based map
+                # Convert list to numpy array if needed
                 binary_map = map_data['binary_map']
+                if isinstance(binary_map, list):
+                    binary_map = np.array(binary_map)
+
                 resolution = map_data.get('resolution', self.grid_size)
 
                 # Update obstacles based on binary map

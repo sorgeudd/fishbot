@@ -291,23 +291,7 @@ class GameplayLearner:
             )
 
             # Load existing patterns if available
-            pattern_file = Path("models/learned_patterns.json")
-            if pattern_file.exists():
-                with open(pattern_file, 'r') as f:
-                    patterns = json.load(f)
-                    self.movement_patterns = patterns.get('movement', {})
-                    self.resource_preferences = patterns.get('resources', {})
-                    self.combat_patterns = patterns.get('combat', {})
-                    for key, pattern in self.movement_patterns.items():
-                        self.movement_patterns[key] = GameplayPattern()
-                        self.movement_patterns[key].__dict__.update(pattern)
-                    for key, pattern in self.resource_preferences.items():
-                        self.resource_preferences[key] = GameplayPattern()
-                        self.resource_preferences[key].__dict__.update(pattern)
-                    for key, pattern in self.combat_patterns.items():
-                        self.combat_patterns[key] = GameplayPattern()
-                        self.combat_patterns[key].__dict__.update(pattern)
-                self.logger.info("Loaded learned patterns from file")
+            self._load_patterns()
 
         except ImportError:
             self.logger.warning("AI models not available - running in basic mode")
@@ -537,10 +521,17 @@ class GameplayLearner:
     def _save_patterns(self):
         """Save learned patterns to file"""
         try:
+            # Convert tuple keys to strings for JSON serialization
             patterns = {
-                'movement': {k: v.to_dict() for k, v in self.movement_patterns.items()},
-                'resources': {k: v.to_dict() for k, v in self.resource_preferences.items()},
-                'combat': {k: v.to_dict() for k, v in self.combat_patterns.items()}
+                'movement': {
+                    str(k): v.to_dict() for k, v in self.movement_patterns.items()
+                },
+                'resources': {
+                    str(k): v.to_dict() for k, v in self.resource_preferences.items()
+                },
+                'combat': {
+                    str(k): v.to_dict() for k, v in self.combat_patterns.items()
+                }
             }
 
             pattern_file = Path("models/learned_patterns.json")
@@ -549,10 +540,45 @@ class GameplayLearner:
             with open(pattern_file, 'w') as f:
                 json.dump(patterns, f, indent=2)
 
-            self.logger.info("Saved learned patterns to file")
+            self.logger.info("Successfully saved patterns to file")
 
         except Exception as e:
             self.logger.error(f"Error saving patterns: {str(e)}")
+            raise
+
+    def _load_patterns(self):
+        """Load patterns from file and convert string keys back to tuples"""
+        try:
+            pattern_file = Path("models/learned_patterns.json")
+            if pattern_file.exists():
+                with open(pattern_file, 'r') as f:
+                    patterns = json.load(f)
+
+                # Convert string keys back to tuples for movement patterns
+                self.movement_patterns = {}
+                for k_str, v in patterns.get('movement', {}).items():
+                    # Remove brackets and split coordinates
+                    coords = k_str.strip('()').split('), (')
+                    if len(coords) == 2:
+                        pos1 = tuple(map(int, coords[0].split(', ')))
+                        pos2 = tuple(map(int, coords[1].split(', ')))
+                        key = (pos1, pos2)
+                        pattern = GameplayPattern()
+                        pattern.__dict__.update(v)
+                        self.movement_patterns[key] = pattern
+
+                # Load other patterns normally
+                self.resource_preferences = {k: GameplayPattern().__dict__.update(v) for k, v in patterns.get('resources', {}).items()}
+                self.combat_patterns = {k: GameplayPattern().__dict__.update(v) for k, v in patterns.get('combat', {}).items()}
+
+                self.logger.info("Loaded learned patterns from file")
+
+        except Exception as e:
+            self.logger.error(f"Error loading patterns: {str(e)}")
+            # Initialize empty patterns on error
+            self.movement_patterns = {}
+            self.resource_preferences = {}
+            self.combat_patterns = {}
 
 
     def predict_next_action(self, current_state: Dict) -> Optional[Dict]:

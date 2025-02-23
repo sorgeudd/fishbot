@@ -116,6 +116,68 @@ class MainWindow:
                                    command=self._download_map)
             download_map_btn.pack(side="right", padx=5)
 
+            # Macro Management Frame
+            macro_frame = ttk.LabelFrame(main_frame, text="Macro Management", padding="5")
+            macro_frame.pack(fill="x", padx=5, pady=2)
+
+            # Macro Name Entry
+            macro_name_frame = ttk.Frame(macro_frame)
+            macro_name_frame.pack(fill="x", padx=5, pady=2)
+            ttk.Label(macro_name_frame, text="Macro Name:").pack(side="left", padx=5)
+            self.macro_name_entry = ttk.Entry(macro_name_frame)
+            self.macro_name_entry.pack(side="left", fill="x", expand=True, padx=5)
+
+            # Macro Controls Frame
+            macro_controls = ttk.Frame(macro_frame)
+            macro_controls.pack(fill="x", padx=5, pady=2)
+
+            # Record/Stop Macro Button
+            self.record_macro_btn = ttk.Button(macro_controls, text="Record Macro", 
+                                       command=self._toggle_macro_recording)
+            self.record_macro_btn.pack(side="left", fill="x", expand=True, padx=2)
+
+            # Play Macro Button
+            self.play_macro_btn = ttk.Button(macro_controls, text="Play Macro",
+                                    command=self._play_macro)
+            self.play_macro_btn.pack(side="right", fill="x", expand=True, padx=2)
+
+            # Sound Trigger Frame
+            sound_frame = ttk.LabelFrame(main_frame, text="Sound Triggers", padding="5")
+            sound_frame.pack(fill="x", padx=5, pady=2)
+
+            # Trigger Name Entry
+            trigger_name_frame = ttk.Frame(sound_frame)
+            trigger_name_frame.pack(fill="x", padx=5, pady=2)
+            ttk.Label(trigger_name_frame, text="Trigger Name:").pack(side="left", padx=5)
+            self.trigger_name_entry = ttk.Entry(trigger_name_frame)
+            self.trigger_name_entry.pack(side="left", fill="x", expand=True, padx=5)
+
+            # Record Sound Button
+            self.record_sound_btn = ttk.Button(sound_frame, text="Record Sound",
+                                      command=self._record_sound)
+            self.record_sound_btn.pack(fill="x", padx=5, pady=2)
+
+            # Action Binding Frame
+            action_frame = ttk.Frame(sound_frame)
+            action_frame.pack(fill="x", padx=5, pady=2)
+            ttk.Label(action_frame, text="Bind Action:").pack(side="left", padx=5)
+
+            # Action Type Combobox
+            self.action_type = ttk.Combobox(action_frame, 
+                                          values=["Key Press", "Mouse Click", "Macro"])
+            self.action_type.pack(side="left", padx=5)
+            self.action_type.set("Key Press")
+
+            # Key/Button Entry
+            self.action_key_entry = ttk.Entry(action_frame, width=10)
+            self.action_key_entry.pack(side="left", padx=5)
+
+            # Save Trigger Button
+            self.save_trigger_btn = ttk.Button(sound_frame, text="Save Trigger",
+                                      command=self._save_sound_trigger)
+            self.save_trigger_btn.pack(fill="x", padx=5, pady=2)
+
+
             # Bot Control Frame
             bot_frame = ttk.LabelFrame(main_frame, text="Bot Control", padding="5")
             bot_frame.pack(fill="x", padx=5, pady=2)
@@ -391,9 +453,109 @@ class MainWindow:
         self.logger.info("Bot stopped")
 
     def _record_sound(self):
-        # To be implemented
-        self.logger.info("Recording fish bite sound...")
-        pass
+        """Record sound for trigger"""
+        try:
+            trigger_name = self.trigger_name_entry.get().strip()
+            if not trigger_name:
+                messagebox.showerror("Error", "Please enter a trigger name")
+                return
+
+            # Toggle recording
+            if self.record_sound_btn.cget("text") == "Record Sound":
+                self.record_sound_btn.config(text="Stop Recording")
+                self.status_label.config(text="Recording Sound...")
+                self.bot.start_sound_monitoring()
+            else:
+                self.record_sound_btn.config(text="Record Sound")
+                self.status_label.config(text="Sound Recorded")
+                self.bot.stop_sound_monitoring()
+
+        except Exception as e:
+            self.logger.error(f"Error recording sound: {str(e)}")
+            messagebox.showerror("Error", f"Failed to record sound: {str(e)}")
+
+    def _save_sound_trigger(self):
+        """Save sound trigger with action binding"""
+        try:
+            trigger_name = self.trigger_name_entry.get().strip()
+            if not trigger_name:
+                messagebox.showerror("Error", "Please enter a trigger name")
+                return
+
+            action_type = self.action_type.get()
+            action_key = self.action_key_entry.get().strip()
+            if not action_key:
+                messagebox.showerror("Error", "Please enter a key or button")
+                return
+
+            # Create action function based on type
+            if action_type == "Key Press":
+                action = lambda: self.bot.press_key(action_key)
+            elif action_type == "Mouse Click":
+                action = lambda: self.bot.click(button=action_key)
+            else:  # Macro
+                action = lambda: self.bot.play_macro(action_key)
+
+            # Save trigger
+            if self.bot.add_sound_trigger(trigger_name, action):
+                self.status_label.config(text="Trigger Saved")
+                self.trigger_name_entry.delete(0, tk.END)
+                self.action_key_entry.delete(0, tk.END)
+            else:
+                messagebox.showerror("Error", "Failed to save trigger")
+
+        except Exception as e:
+            self.logger.error(f"Error saving sound trigger: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save trigger: {str(e)}")
+
+    def _toggle_macro_recording(self):
+        """Toggle macro recording on/off"""
+        try:
+            if not self.bot.recording_macro:
+                macro_name = self.macro_name_entry.get().strip()
+                if not macro_name:
+                    messagebox.showerror("Error", "Please enter a macro name")
+                    return
+
+                if self.bot.start_macro_recording(macro_name):
+                    self.record_macro_btn.config(text="Stop Recording")
+                    self.play_macro_btn.config(state="disabled")
+                    self.status_label.config(text=f"Recording Macro: {macro_name}")
+            else:
+                if self.bot.stop_macro_recording():
+                    self.record_macro_btn.config(text="Record Macro")
+                    self.play_macro_btn.config(state="normal")
+                    self.status_label.config(text="Macro Recorded")
+                    self.macro_name_entry.delete(0, tk.END)
+
+        except Exception as e:
+            self.logger.error(f"Error toggling macro recording: {str(e)}")
+            messagebox.showerror("Error", f"Failed to toggle macro recording: {str(e)}")
+
+    def _play_macro(self):
+        """Play selected macro"""
+        try:
+            macro_name = self.macro_name_entry.get().strip()
+            if not macro_name:
+                messagebox.showerror("Error", "Please enter a macro name")
+                return
+
+            if macro_name not in self.bot.macros:
+                messagebox.showerror("Error", f"Macro '{macro_name}' not found")
+                return
+
+            self.status_label.config(text=f"Playing Macro: {macro_name}")
+            success = self.bot.play_macro(macro_name)
+
+            if success:
+                self.status_label.config(text="Macro Completed")
+            else:
+                self.status_label.config(text="Macro Failed")
+                messagebox.showerror("Error", "Failed to play macro")
+
+        except Exception as e:
+            self.logger.error(f"Error playing macro: {str(e)}")
+            messagebox.showerror("Error", f"Failed to play macro: {str(e)}")
 
     def _open_settings(self):
         # To be implemented
