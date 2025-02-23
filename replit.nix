@@ -1,5 +1,8 @@
 {pkgs}: {
   deps = [
+    pkgs.libGLU
+    pkgs.libGL
+    pkgs.zip
     pkgs.xvfb-run
     pkgs.scrot
     pkgs.zlib
