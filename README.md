@@ -53,31 +53,28 @@ pip install numpy opencv-python pillow pyaudio pyautogui requests
 - Download maps from URLs for navigation and resource locations
 - Maps are used for pathfinding and resource detection
 
-## Testing
+## Learning Mode
 
-### Windows Development Environment (Recommended)
+The learning mode allows the bot to learn from your actions:
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the tests:
-   ```bash
-   python -m unittest test_bot.py -v
-   ```
+1. Click "Start Learning" button
+2. Perform your normal fishing routine:
+   - Cast your line
+   - Wait for fish
+   - Reel in when you get a bite
+3. Click "Stop Learning" when you're satisfied
+4. The bot will analyze and learn from your actions
+5. Start the bot to use the learned patterns
 
-Note: Tests must be run on Windows as they require display server access for GUI interaction.
+## Features
 
-### Test Coverage
-
-The test suite includes:
-- Mouse movement accuracy
-- Keyboard input timing
-- Fish bite detection
-- Full fishing cycle automation
-- Game window detection
-- Error handling
+- AI-powered pattern recognition
+- Automatic window detection
+- Map-based navigation
+- Custom learning mode
+- Emergency stop (F6)
+- Detailed logging
+- Configurable key bindings
 
 ## Troubleshooting
 
@@ -91,6 +88,16 @@ The test suite includes:
    - Run as Administrator
    - Ensure game window is active and not minimized
    - Check key bindings match your game settings
+
+3. If learning mode isn't working:
+   - Ensure the game window is detected first
+   - Try running the bot as Administrator
+   - Check if the game window is properly focused
+
+4. If window detection fails:
+   - Try running as Administrator
+   - Make sure the game window is not minimized
+   - Enter the exact window title if auto-detection fails
 
 ## Support
 
