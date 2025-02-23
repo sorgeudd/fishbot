@@ -6,6 +6,7 @@ from config_manager import ConfigManager
 import urllib.parse
 import threading
 import sys
+import traceback
 
 class MainWindow:
     def __init__(self, master, test_mode=False):
@@ -25,12 +26,120 @@ class MainWindow:
             # Configure main window
             self.master.title("Fishing Bot")
             self.master.resizable(True, True)  # Make window resizable
-            self.master.minsize(400, 800)  # Set minimum size
-            self.master.geometry("400x800")  # Set default size to be taller and less wide
+            self.master.minsize(400, 600)  # Set minimum size
+            self.master.geometry("400x800")  # Set default size
             self.logger.debug("Main window configured")
 
-            self._create_styles()
-            self._create_gui()
+            # Create main container frame
+            main_frame = ttk.Frame(self.master)
+            main_frame.pack(fill="both", expand=True)
+
+            # Status section at top
+            status_frame = ttk.LabelFrame(main_frame, text="Status", padding="5")
+            status_frame.pack(fill="x", padx=5, pady=2)
+            self.status_label = ttk.Label(status_frame, text="Idle")
+            self.status_label.pack(padx=5, pady=2)
+
+            # Controls section
+            controls_frame = ttk.LabelFrame(main_frame, text="Controls", padding="5")
+            controls_frame.pack(fill="x", padx=5, pady=2)
+
+            # Emergency Stop
+            self.emergency_stop_btn = ttk.Button(controls_frame, text="EMERGENCY STOP (F6)", 
+                                          command=self._emergency_stop, style="Emergency.TButton")
+            self.emergency_stop_btn.pack(fill="x", padx=5, pady=2)
+
+            # Window Detection Frame
+            window_frame = ttk.LabelFrame(main_frame, text="Game Window", padding="5")
+            window_frame.pack(fill="x", padx=5, pady=2)
+
+            # Window Title Entry
+            title_frame = ttk.Frame(window_frame)
+            title_frame.pack(fill="x", padx=5, pady=2)
+            ttk.Label(title_frame, text="Window Title:").pack(side="left", padx=5)
+            self.window_title_entry = ttk.Entry(title_frame)
+            self.window_title_entry.pack(side="left", fill="x", expand=True, padx=5)
+
+            # Detect Window Button
+            detect_frame = ttk.Frame(window_frame)
+            detect_frame.pack(fill="x", padx=5, pady=2)
+            self.detect_window_btn = ttk.Button(detect_frame, text="Detect Window", 
+                                         command=self._detect_window)
+            self.detect_window_btn.pack(side="left", padx=5)
+            self.window_status_label = ttk.Label(detect_frame, text="No window detected")
+            self.window_status_label.pack(side="left", padx=5)
+
+            # Learning Mode Frame
+            learning_frame = ttk.LabelFrame(main_frame, text="Learning Mode", padding="5")
+            learning_frame.pack(fill="x", padx=5, pady=2)
+
+            # Learning Status
+            self.learning_status = ttk.Label(learning_frame, text="Learning: Inactive")
+            self.learning_status.pack(padx=5, pady=2)
+
+            # Learning Controls Frame
+            learning_controls = ttk.Frame(learning_frame)
+            learning_controls.pack(fill="x", padx=5, pady=2)
+
+            # Start/Stop Learning Button
+            self.learning_btn = ttk.Button(learning_controls, text="Start Learning", 
+                                    command=self._toggle_learning)
+            self.learning_btn.pack(side="left", fill="x", expand=True, padx=2)
+
+            # Reset Learning Button
+            self.reset_learning_btn = ttk.Button(learning_controls, text="Reset Learning",
+                                          command=self._reset_learning,
+                                          style="Danger.TButton")
+            self.reset_learning_btn.pack(side="right", fill="x", expand=True, padx=2)
+
+            # Import Video Button
+            self.import_video_btn = ttk.Button(learning_frame, text="Import Training Video",
+                                        command=self._import_training_video)
+            self.import_video_btn.pack(fill="x", padx=5, pady=2)
+
+            # Map Management Frame
+            map_frame = ttk.LabelFrame(main_frame, text="Map Management", padding="5")
+            map_frame.pack(fill="x", padx=5, pady=2)
+
+            # Load Map File
+            load_map_btn = ttk.Button(map_frame, text="Load Map File", 
+                                command=self._load_map_file)
+            load_map_btn.pack(fill="x", padx=5, pady=2)
+
+            # Download Map URL
+            url_frame = ttk.Frame(map_frame)
+            url_frame.pack(fill="x", padx=5, pady=2)
+            ttk.Label(url_frame, text="Map URL:").pack(side="left", padx=5)
+            self.map_url_entry = ttk.Entry(url_frame)
+            self.map_url_entry.pack(side="left", fill="x", expand=True, padx=5)
+            download_map_btn = ttk.Button(url_frame, text="Download", 
+                                   command=self._download_map)
+            download_map_btn.pack(side="right", padx=5)
+
+            # Bot Control Frame
+            bot_frame = ttk.LabelFrame(main_frame, text="Bot Control", padding="5")
+            bot_frame.pack(fill="x", padx=5, pady=2)
+
+            # Start Bot Button
+            self.start_bot_btn = ttk.Button(bot_frame, text="Start Bot", 
+                                     command=self._start_bot)
+            self.start_bot_btn.pack(fill="x", padx=5, pady=2)
+
+            # Log Display (at bottom, fixed height)
+            log_frame = ttk.LabelFrame(main_frame, text="Log", padding="5")
+            log_frame.pack(fill="both", expand=True, padx=5, pady=2)
+
+            # Create log display with fixed height (30% of window)
+            self.log_display = scrolledtext.ScrolledText(log_frame, height=10)
+            self.log_display.pack(fill="both", expand=True, padx=5, pady=2)
+
+            # Configure row/column weights
+            main_frame.grid_rowconfigure(1, weight=1)
+            main_frame.grid_columnconfigure(0, weight=1)
+
+            # Update logging to use GUI
+            self._setup_gui_logging()
+
             self._register_emergency_stop()
 
             self.logger.info("GUI initialization complete")
@@ -53,122 +162,6 @@ class MainWindow:
         except Exception as e:
             print(f"Error setting up initial logging: {str(e)}")
             sys.exit(1)
-
-    def _create_gui(self):
-        """Create all GUI components with logging"""
-        try:
-            # Status section
-            self.logger.debug("Creating status section")
-            status_frame = ttk.LabelFrame(self.master, text="Status", padding="10")
-            status_frame.pack(fill="x", padx=10, pady=5)
-            self.status_label = ttk.Label(status_frame, text="Idle")
-            self.status_label.pack(padx=5, pady=5)
-
-            # Log Display (create this early for logging)
-            self.logger.debug("Creating log display")
-            log_frame = ttk.LabelFrame(self.master, text="Log", padding="10")
-            log_frame.pack(fill="both", expand=True, padx=10, pady=5)
-            self.log_display = scrolledtext.ScrolledText(log_frame, height=20)
-            self.log_display.pack(fill="both", expand=True, padx=5, pady=5)
-
-            # Update logging to use GUI
-            self._setup_gui_logging()
-
-            # Controls section
-            self.logger.debug("Creating controls section")
-            controls_frame = ttk.LabelFrame(self.master, text="Controls", padding="10")
-            controls_frame.pack(fill="x", padx=10, pady=5)
-
-            # Emergency Stop
-            self.emergency_stop_btn = ttk.Button(controls_frame, text="EMERGENCY STOP (F6)", 
-                                             command=self._emergency_stop, style="Emergency.TButton")
-            self.emergency_stop_btn.pack(fill="x", padx=5, pady=5)
-
-            # Window Detection Frame
-            self.logger.debug("Creating window detection section")
-            window_frame = ttk.LabelFrame(self.master, text="Game Window", padding="10")
-            window_frame.pack(fill="x", padx=10, pady=5)
-
-            # Window Title Entry
-            title_frame = ttk.Frame(window_frame)
-            title_frame.pack(fill="x", padx=5, pady=2)
-            ttk.Label(title_frame, text="Window Title:").pack(side="left", padx=5)
-            self.window_title_entry = ttk.Entry(title_frame)
-            self.window_title_entry.pack(side="left", fill="x", expand=True, padx=5)
-
-            # Detect Window Button
-            detect_frame = ttk.Frame(window_frame)
-            detect_frame.pack(fill="x", padx=5, pady=5)
-            self.detect_window_btn = ttk.Button(detect_frame, text="Detect Window", 
-                                            command=self._detect_window)
-            self.detect_window_btn.pack(side="left", padx=5)
-            self.window_status_label = ttk.Label(detect_frame, text="No window detected")
-            self.window_status_label.pack(side="left", padx=5)
-
-            # Learning Mode Frame
-            self.logger.debug("Creating learning mode section")
-            learning_frame = ttk.LabelFrame(self.master, text="Learning Mode", padding="10")
-            learning_frame.pack(fill="x", padx=10, pady=5)
-
-            # Learning Status
-            self.learning_status = ttk.Label(learning_frame, text="Learning: Inactive")
-            self.learning_status.pack(padx=5, pady=5)
-
-            # Learning Controls Frame
-            learning_controls = ttk.Frame(learning_frame)
-            learning_controls.pack(fill="x", padx=5, pady=5)
-
-            # Start/Stop Learning Button
-            self.learning_btn = ttk.Button(learning_controls, text="Start Learning", 
-                                       command=self._toggle_learning)
-            self.learning_btn.pack(side="left", fill="x", expand=True, padx=2)
-
-            # Reset Learning Button
-            self.reset_learning_btn = ttk.Button(learning_controls, text="Reset Learning",
-                                             command=self._reset_learning,
-                                             style="Danger.TButton")
-            self.reset_learning_btn.pack(side="right", fill="x", expand=True, padx=2)
-
-            # Import Video Button
-            self.import_video_btn = ttk.Button(learning_frame, text="Import Training Video",
-                                           command=self._import_training_video)
-            self.import_video_btn.pack(fill="x", padx=5, pady=5)
-
-            # Map Management Frame
-            self.logger.debug("Creating map management section")
-            map_frame = ttk.LabelFrame(self.master, text="Map Management", padding="10")
-            map_frame.pack(fill="x", padx=10, pady=5)
-
-            # Load Map File
-            load_map_btn = ttk.Button(map_frame, text="Load Map File", 
-                                   command=self._load_map_file)
-            load_map_btn.pack(fill="x", padx=5, pady=5)
-
-            # Download Map URL
-            url_frame = ttk.Frame(map_frame)
-            url_frame.pack(fill="x", padx=5, pady=5)
-            ttk.Label(url_frame, text="Map URL:").pack(side="left", padx=5)
-            self.map_url_entry = ttk.Entry(url_frame)
-            self.map_url_entry.pack(side="left", fill="x", expand=True, padx=5)
-            download_map_btn = ttk.Button(url_frame, text="Download", 
-                                      command=self._download_map)
-            download_map_btn.pack(side="right", padx=5)
-
-            # Bot Control Frame
-            self.logger.debug("Creating bot control section")
-            bot_frame = ttk.LabelFrame(self.master, text="Bot Control", padding="10")
-            bot_frame.pack(fill="x", padx=10, pady=5)
-
-            # Start Bot Button
-            self.start_bot_btn = ttk.Button(bot_frame, text="Start Bot", 
-                                        command=self._start_bot)
-            self.start_bot_btn.pack(fill="x", padx=5, pady=5)
-
-            self.logger.info("All GUI components created successfully")
-
-        except Exception as e:
-            self.logger.error(f"Error creating GUI components: {str(e)}")
-            raise
 
     def _create_styles(self):
         """Create custom styles for buttons"""
@@ -213,7 +206,9 @@ class MainWindow:
         """Toggle learning mode on/off"""
         try:
             if not self.bot.learning_mode:
-                self.logger.info("Starting learning mode")
+                self.logger.info("Attempting to start learning mode...")
+                if self.test_mode:
+                    self.logger.debug("Running in test mode")
                 success = self.bot.start_learning()
                 if success:
                     self.logger.info("Successfully started learning mode")
@@ -221,11 +216,12 @@ class MainWindow:
                     self.learning_status.config(text="Learning: Active")
                     self.status_label.config(text="Learning Mode")
                     self.start_bot_btn.config(state="disabled")
+                    self.logger.debug("GUI updated for learning mode start")
                 else:
                     self.logger.error("Failed to start learning mode")
                     messagebox.showerror("Error", "Failed to start learning mode")
             else:
-                self.logger.info("Stopping learning mode")
+                self.logger.info("Attempting to stop learning mode...")
                 success = self.bot.stop_learning()
                 if success:
                     self.logger.info("Successfully stopped learning mode")
@@ -233,11 +229,13 @@ class MainWindow:
                     self.learning_status.config(text="Learning: Inactive")
                     self.status_label.config(text="Idle")
                     self.start_bot_btn.config(state="normal")
+                    self.logger.debug("GUI updated for learning mode stop")
                 else:
                     self.logger.error("Failed to stop learning mode")
                     messagebox.showerror("Error", "Failed to stop learning mode")
         except Exception as e:
             self.logger.error(f"Error toggling learning mode: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
             messagebox.showerror("Error", f"Error toggling learning mode: {str(e)}")
 
     def _register_emergency_stop(self):
