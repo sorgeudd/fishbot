@@ -129,11 +129,25 @@ class MockEnvironment:
 
     def click(self, button='left', clicks=1):
         """Record mouse click"""
-        return self.record_input('mouse_click', button=button, clicks=clicks)
+        current_time = time.time()
+        if current_time - self.state.last_action_time >= self.min_action_interval:
+            event = {'type': 'mouse_click', 'timestamp': current_time, 
+                    'button': button, 'clicks': clicks}
+            self.input_events.append(event)
+            self.state.last_action_time = current_time
+            return True
+        return False
 
     def press_key(self, key, duration=None):
         """Record key press"""
-        return self.record_input('key_press', key=key, duration=duration)
+        current_time = time.time()
+        if current_time - self.state.last_action_time >= self.min_action_interval:
+            event = {'type': 'key_press', 'timestamp': current_time, 
+                    'key': key, 'duration': duration}
+            self.input_events.append(event)
+            self.state.last_action_time = current_time
+            return True
+        return False
 
     def get_screen_region(self):
         """Get current game state data"""
@@ -166,4 +180,5 @@ class MockEnvironment:
 def create_test_environment():
     """Create and return a mock environment instance"""
     env = MockEnvironment()
+    env.min_action_interval = 0.0  # Set minimum interval to 0 for testing
     return env

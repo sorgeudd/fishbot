@@ -114,7 +114,7 @@ class FishingBot:
 
         Args:
             window_title (str): Full or partial window title to match. If None, 
-                              will try to find any game window from common titles.
+                                  will try to find any game window from common titles.
 
         Returns:
             tuple: (success, message)
@@ -124,7 +124,12 @@ class FishingBot:
         if self.test_mode:
             self.window_handle = 1
             self.window_rect = (0, 0, 800, 600)
+            if window_title:
+                return True, f"Found specific window: {window_title}"
             return True, "Test mode: Using mock window"
+
+        if platform.system() != 'Windows':
+            return False, "Window detection requires Windows OS"
 
         try:
             if not window_title:
@@ -167,6 +172,14 @@ class FishingBot:
                 self.window_placement = self.win32gui.GetWindowPlacement(self.window_handle)
                 self.window_style = self.win32gui.GetWindowLong(self.window_handle, -16)  # GWL_STYLE
 
+                # Get process info for debugging
+                try:
+                    _, pid = self.win32process.GetWindowThreadProcessId(self.window_handle)
+                    self.window_process_id = pid
+                except Exception as e:
+                    self.logger.warning(f"Could not get process ID: {str(e)}")
+                    self.window_process_id = None
+
                 # Update config
                 self.config['game_window'] = self.window_rect
                 self.config['window_title'] = title
@@ -175,6 +188,7 @@ class FishingBot:
                 self.logger.info(f"Found window '{title}' at {self.window_rect}")
                 self.logger.debug(f"Window handle: {self.window_handle}")
                 self.logger.debug(f"Window placement: {self.window_placement}")
+                self.logger.debug(f"Process ID: {self.window_process_id}")
 
                 return True
 
@@ -186,6 +200,16 @@ class FishingBot:
 
     def get_window_info(self):
         """Get detailed information about the current game window"""
+        if self.test_mode:
+            return {
+                'title': 'Test Game Window',
+                'rect': (0, 0, 800, 600),
+                'is_visible': True,
+                'is_active': True,
+                'process_id': 12345,
+                'placement': None
+            }
+
         if not self.window_handle:
             return None
 
@@ -195,17 +219,9 @@ class FishingBot:
                 'rect': self.window_rect,
                 'is_visible': self.win32gui.IsWindowVisible(self.window_handle),
                 'is_active': self.is_window_active(),
+                'process_id': getattr(self, 'window_process_id', None),
                 'placement': self.window_placement if hasattr(self, 'window_placement') else None
             }
-
-            # Get process info
-            if hasattr(self, 'win32process'):
-                try:
-                    _, pid = self.win32process.GetWindowThreadProcessId(self.window_handle)
-                    info['process_id'] = pid
-                except:
-                    info['process_id'] = None
-
             return info
 
         except Exception as e:
@@ -224,29 +240,84 @@ class FishingBot:
         try:
             import json
             import csv
+            from pathlib import Path
+
+            file_path = Path(map_file)
+            if not file_path.exists():
+                self.logger.error(f"Map file not found: {map_file}")
+                return False
+
+            self.logger.info(f"Loading map data from {file_path}")
 
             # Handle different file formats
-            if map_file.endswith('.json'):
-                with open(map_file, 'r') as f:
+            if file_path.suffix.lower() == '.json':
+                with open(file_path, 'r') as f:
                     map_data = json.load(f)
-                    self.pathfinder.load_map(map_data)
-                    self.logger.info(f"Loaded JSON map data from {map_file}")
+                    self.logger.debug(f"Loaded JSON data: {len(map_data)} bytes")
+                    if not self._validate_map_data(map_data):
+                        return False
+                    self.pathfinder.update_map(map_data)  # Changed from load_map
+                    self.logger.info(f"Successfully loaded JSON map with {len(map_data.get('nodes', []))} nodes")
                     return True
 
-            elif map_file.endswith('.csv'):
-                with open(map_file, 'r') as f:
+            elif file_path.suffix.lower() == '.csv':
+                with open(file_path, 'r') as f:
                     reader = csv.DictReader(f)
                     map_data = list(reader)
-                    self.pathfinder.load_map(map_data)
-                    self.logger.info(f"Loaded CSV map data from {map_file}")
+                    self.logger.debug(f"Loaded CSV data: {len(map_data)} rows")
+                    if not self._validate_map_data(map_data, format='csv'):
+                        return False
+                    self.pathfinder.update_map(map_data)  # Changed from load_map
+                    self.logger.info(f"Successfully loaded CSV map with {len(map_data)} rows")
                     return True
 
             else:
-                self.logger.error(f"Unsupported map file format: {map_file}")
+                self.logger.error(f"Unsupported map file format: {file_path.suffix}")
                 return False
 
         except Exception as e:
             self.logger.error(f"Error loading map data: {str(e)}")
+            return False
+
+    def _validate_map_data(self, data, format='json'):
+        """Validate map data structure
+
+        Args:
+            data: Map data to validate
+            format: Format of the data ('json' or 'csv')
+
+        Returns:
+            bool: True if data is valid
+        """
+        try:
+            if format == 'json':
+                required_keys = {'nodes', 'edges'}
+                if not all(key in data for key in required_keys):
+                    self.logger.error(f"Missing required keys in map data: {required_keys}")
+                    return False
+
+                # Validate nodes
+                for node in data['nodes']:
+                    if not all(key in node for key in ['id', 'x', 'y', 'type']):
+                        self.logger.error(f"Invalid node data: {node}")
+                        return False
+
+                # Validate edges
+                for edge in data['edges']:
+                    if not all(key in edge for key in ['from', 'to']):
+                        self.logger.error(f"Invalid edge data: {edge}")
+                        return False
+
+            elif format == 'csv':
+                required_columns = {'x', 'y', 'type'}
+                if not data or not all(col in data[0] for col in required_columns):
+                    self.logger.error(f"Missing required columns in CSV: {required_columns}")
+                    return False
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error validating map data: {str(e)}")
             return False
 
     def download_map_data(self, url):
@@ -261,16 +332,29 @@ class FishingBot:
         try:
             import requests
             import tempfile
-            import os
+            from pathlib import Path
 
             # Download map file
-            response = requests.get(url)
+            self.logger.info(f"Downloading map data from {url}")
+            response = requests.get(url, timeout=30)
             if response.status_code != 200:
                 self.logger.error(f"Failed to download map data: {response.status_code}")
                 return False
 
+            # Determine file format from Content-Type or URL
+            content_type = response.headers.get('Content-Type', '')
+            file_ext = Path(url).suffix.lower()
+
+            if 'json' in content_type or file_ext == '.json':
+                suffix = '.json'
+            elif 'csv' in content_type or file_ext == '.csv':
+                suffix = '.csv'
+            else:
+                self.logger.error("Unknown map data format")
+                return False
+
             # Save to temp file
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(mode='wb', suffix=suffix, delete=False) as tmp:
                 tmp.write(response.content)
                 tmp_path = tmp.name
 
@@ -278,8 +362,10 @@ class FishingBot:
             success = self.load_map_data(tmp_path)
 
             # Cleanup temp file
-            os.unlink(tmp_path)
+            Path(tmp_path).unlink()
 
+            if success:
+                self.logger.info("Successfully downloaded and loaded map data")
             return success
 
         except Exception as e:
@@ -632,13 +718,10 @@ class FishingBot:
         try:
             if self.test_mode:
                 state = self.test_env.get_screen_region()
-                # Force bite detection in test mode after 1 second
-                if hasattr(self, '_test_mode_start_time'):
-                    if time.time() - self._test_mode_start_time > 1.0:
-                        return True
-                else:
-                    self._test_mode_start_time = time.time()
-                return bool(state.get('fish_bite_active', False))
+                if state.get('fish_bite_active', False):
+                    self.logger.debug("Test mode: Bite detected")
+                    return True
+                return False
 
             if not self.config['game_window']:
                 self.logger.warning("Game window not set")
@@ -715,10 +798,10 @@ class FishingBot:
 
             # Start recording
             stream = p.open(format=FORMAT,
-                                 channels=CHANNELS,
-                                 rate=RATE,
-                                 input=True,
-                                 frames_per_buffer=CHUNK)
+                                     channels=CHANNELS,
+                                     rate=RATE,
+                                     input=True,
+                                     frames_per_buffer=CHUNK)
 
             self.logger.info("Recording...")
             frames = []
@@ -798,12 +881,28 @@ class FishingBot:
             self.logger.info("Bot started")
 
     def stop(self):
-        if self.running:
-            self.running = False
-            self.stop_event.set()
-            if self.bot_thread:
-                self.bot_thread.join()
-            self.logger.info("Bot stopped")
+        """Stop bot operation and cleanup resources"""
+        try:
+            if self.running:
+                self.logger.info("Stopping bot operation...")
+                self.running = False
+                self.stop_event.set()
+
+                if self.bot_thread:
+                    self.logger.debug("Waiting for bot thread to finish...")
+                    self.bot_thread.join(timeout=5.0)  # Add timeout
+                    if self.bot_thread.is_alive():
+                        self.logger.warning("Bot thread did not terminate properly")
+
+                self.logger.info("Bot stopped successfully")
+
+            # Reset state
+            self.emergency_stop = False
+            self.bot_thread = None
+            self.stop_event.clear()
+
+        except Exception as e:
+            self.logger.error(f"Error stopping bot: {str(e)}")
 
     def emergency_stop_action(self):
         self.emergency_stop = True
@@ -874,20 +973,8 @@ class FishingBot:
                         'in_combat': self.check_combat_status()
                     }
 
-                    # Clear test mode timer at start of each cycle
-                    if self.test_mode:
-                        self._test_mode_start_time = time.time()
-
-                    # Record fishing action
-                    self.record_action('cast', current_state['position'])
-                    self.logger.debug("Recording cast action")
-
                     # Cast fishing line with variable timing
-                    cast_power = self.config.get('cast_power', 50)
-                    cast_power += random.uniform(-5, 5)
-                    cast_power = max(0, min(100, cast_power))
-
-                    self.press_key(self.config['cast_key'], duration=cast_power/100.0)
+                    self.press_key(self.config['cast_key'])
                     time.sleep(random.uniform(0.5, 1.0) if self.test_mode else random.uniform(1.8, 2.2))
 
                     # Wait for and handle fish bite
@@ -898,20 +985,20 @@ class FishingBot:
                     while not self.stop_event.is_set() and time.time() - start_time < max_wait:
                         if self._detect_bite():
                             bite_detected = True
+                            self.logger.debug("Bite detected, reeling...")
                             time.sleep(random.uniform(0.1, 0.3))
                             self.press_key(self.config['reel_key'])
                             self.record_action('reel', current_state['position'], success=True)
-                            self.logger.debug("Recording reel action")
                             time.sleep(random.uniform(0.5, 1.0) if self.test_mode else random.uniform(2.8, 3.2))
                             break
                         time.sleep(0.1)
 
                     if not bite_detected:
                         self.record_action('timeout', current_state['position'], success=False)
-                        self.logger.debug(""Recording timeout action")
+                        self.logger.debug("Recording timeout action")
 
+                # Regular fishing bot behavior
                 else:
-                    # Regular fishing bot behavior
                     # Get cast power and add randomization
                     cast_power = self.config.get('cast_power', 50)
                     cast_power += random.uniform(-5, 5)  # Add variation
@@ -921,37 +1008,48 @@ class FishingBot:
                     self.press_key(self.config['cast_key'], duration=cast_power/100.0)
                     time.sleep(random.uniform(1.8, 2.2))  # Randomized delay
 
-                    # Wait for fish bite
-                    while not self.stop_event.is_set():
-                        if self._detect_bite():
-                            # Add random delay before reeling
-                            time.sleep(random.uniform(0.1, 0.3))
+                    # Wait for fish bite with timeout
+                    bite_detected = False
+                    start_time = time.time()
+                    max_wait = 2.0 if self.test_mode else 10.0
 
-                            # Reel in fish with randomized timing
+                    while not self.stop_event.is_set() and time.time() - start_time < max_wait:
+                        if self._detect_bite():
+                            bite_detected = True
+                            self.logger.debug("Bite detected, reeling...")
+                            time.sleep(random.uniform(0.1, 0.3))
                             self.press_key(self.config['reel_key'])
                             time.sleep(random.uniform(2.8, 3.2))
                             break
                         time.sleep(0.1)
 
-                    # Record action if in learning mode
-                    if self.learning_mode:
-                        self.record_action('fish', self.get_current_position(),
-                                        success_rate=1.0)  # TODO: Implement success detection
-
                 # Scan for resources and handle combat periodically
-                time.sleep(self.config['resource_scan_interval'])
-                resources, obstacles = self.scan_surroundings()
-
-                if self.check_combat_status():
-                    self._handle_combat()
-                elif resources:
-                    for resource in resources:
-                        self.navigate_to(resource['position'])
-                        # Record gathering action if in learning mode
-                        if self.learning_mode:
-                            self.record_action('gather', resource['position'],
-                                            resource_type=resource['type'])
+                self._scan_and_handle_environment()
 
             except Exception as e:
                 self.logger.error(f"Error in bot loop: {str(e)}")
-                time.sleep(1)
+                if not self.test_mode:
+                    time.sleep(1.0)  # Prevent rapid retries in case of persistent errors
+
+    def _scan_and_handle_environment(self):
+        """Handle resource scanning and combat situations"""
+        try:
+            # Check for combat
+            if self.check_combat_status():
+                self._handle_combat()
+                return
+
+            # Scan for resources
+            resources = self.scan_for_resources()
+            for resource in resources:
+                if self.stop_event.is_set():
+                    break
+                # Navigate to resource
+                self.navigate_to(resource['position'])
+                # Record gathering action if in learning mode
+                if self.learning_mode:
+                    self.record_action('gather', resource['position'],
+                                        resource_type=resource['type'])
+
+        except Exception as e:
+            self.logger.error(f"Error in environment scanning: {str(e)}")

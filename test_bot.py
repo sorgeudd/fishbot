@@ -7,6 +7,7 @@ import time
 import tempfile
 import json
 import os
+import csv
 
 class TestFishingBot(unittest.TestCase):
     def setUp(self):
@@ -25,13 +26,18 @@ class TestFishingBot(unittest.TestCase):
                     self.logger.info("Stopping bot in tearDown")
                     self.bot.stop()
                     if self.bot.bot_thread:
-                        self.bot.bot_thread.join(timeout=2.0)  # Add timeout
+                        self.bot.bot_thread.join(timeout=2.0)
+                        if self.bot.bot_thread.is_alive():
+                            self.logger.warning("Bot thread still alive after timeout")
                 if self.bot.learning_mode:
                     self.logger.info("Stopping learning mode in tearDown")
                     self.bot.stop_learning_mode()
             if hasattr(self, 'mock_env'):
                 self.logger.info("Stopping mock environment in tearDown")
                 self.mock_env.stop_simulation()
+                # Wait for mock environment thread to finish
+                if hasattr(self.mock_env, 'simulation_thread'):
+                    self.mock_env.simulation_thread.join(timeout=2.0)
         except Exception as e:
             self.logger.error(f"Error in tearDown: {str(e)}")
             raise
@@ -254,10 +260,6 @@ class TestFishingBot(unittest.TestCase):
 
     def test_map_functionality(self):
         """Test map loading and navigation features"""
-        import tempfile
-        import json
-        import os
-
         # Create a test map file
         test_map = {
             'nodes': [
@@ -276,6 +278,9 @@ class TestFishingBot(unittest.TestCase):
             tmp_path = tmp.name
 
         try:
+            # Test map validation
+            self.assertTrue(self.bot._validate_map_data(test_map))
+
             # Test loading from file
             success = self.bot.load_map_data(tmp_path)
             self.assertTrue(success)
@@ -287,6 +292,25 @@ class TestFishingBot(unittest.TestCase):
             nav_events = [e for e in self.mock_env.input_events 
                          if e['type'] in ('mouse_move', 'key_press')]
             self.assertGreater(len(nav_events), 0)
+
+            # Test invalid map data
+            invalid_map = {'nodes': []}  # Missing required data
+            self.assertFalse(self.bot._validate_map_data(invalid_map))
+
+            # Test CSV format
+            csv_data = [
+                {'x': '100', 'y': '100', 'type': 'resource'},
+                {'x': '200', 'y': '200', 'type': 'path'}
+            ]
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp_csv:
+                writer = csv.DictWriter(tmp_csv, fieldnames=['x', 'y', 'type'])
+                writer.writeheader()
+                writer.writerows(csv_data)
+                tmp_csv_path = tmp_csv.name
+
+            success = self.bot.load_map_data(tmp_csv_path)
+            self.assertTrue(success)
+            os.unlink(tmp_csv_path)
 
         finally:
             os.unlink(tmp_path)

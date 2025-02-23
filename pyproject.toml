@@ -10,6 +10,7 @@ dependencies = [
     "pyautogui>=0.9.54",
     "requests>=2.32.3",
     "torch>=2.6.0",
+    "trafilatura>=2.0.0",
     "transformers>=4.49.0",
 ]
 
