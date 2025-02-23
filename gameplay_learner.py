@@ -114,19 +114,19 @@ class GameplayLearner:
                         movement = self._detect_movement(last_frame, frame)
                         if movement:
                             self.record_action('move', movement['position'], 
-                                            target_position=movement['target'])
+                                             target_position=movement['target'])
 
                         # Detect combat
                         combat = self._detect_combat(frame)
                         if combat:
                             self.record_action('combat', combat['position'],
-                                            combat_ability=combat['ability'])
+                                             combat_ability=combat['ability'])
 
                         # Detect resource gathering
                         resource = self._detect_resource_gathering(frame)
                         if resource:
                             self.record_action('gather', resource['position'],
-                                            resource_type=resource['type'])
+                                             resource_type=resource['type'])
 
                     last_frame = frame.copy()
                     last_time = current_time
@@ -259,7 +259,7 @@ class GameplayLearner:
             self.combat_patterns.clear()
 
             # Save empty patterns
-            self._save_patterns()
+            self.save_patterns()
 
             self.logger.info("Successfully reset all learned patterns")
             return True
@@ -323,19 +323,32 @@ class GameplayLearner:
 
     def stop_learning(self):
         """Stop recording and analyze patterns"""
-        if not self.is_learning:
-            return
+        try:
+            if not self.is_learning:
+                self.logger.debug("Learning mode was not active")
+                return True
 
-        self.is_learning = False
-        if self.learning_start_time:
-            duration = time.time() - self.learning_start_time
+            self.is_learning = False
+            duration = time.time() - self.learning_start_time if self.learning_start_time else 0
             self.logger.info(f"Stopped learning mode after {duration:.1f} seconds")
 
-        # Analyze recorded actions
-        self._analyze_patterns()
+            # Analyze recorded actions
+            self._analyze_patterns()
 
-        # Save learned patterns
-        self._save_patterns()
+            # Create models directory if it doesn't exist
+            Path("models").mkdir(exist_ok=True)
+
+            # Save learned patterns
+            if not self.save_patterns():
+                self.logger.error("Failed to save patterns after learning")
+                return False
+
+            self.logger.info("Successfully stopped learning mode and saved patterns")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error stopping learning mode: {str(e)}")
+            return False
 
     def record_action(self, action_type: str, position: Tuple[int, int], **kwargs):
         """Record a player action during learning mode"""
@@ -511,6 +524,16 @@ class GameplayLearner:
             ] + [0] * 13  # Pad to 15 features
         return [0] * 15  # Return zeroed features for unsupported pattern types
 
+    def save_patterns(self):
+        """Public method to save learned patterns to file"""
+        try:
+            self._save_patterns()
+            self.logger.info("Successfully saved patterns to file")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving patterns: {str(e)}")
+            return False
+
     def _save_patterns(self):
         """Save learned patterns to file"""
         try:
@@ -530,6 +553,7 @@ class GameplayLearner:
 
         except Exception as e:
             self.logger.error(f"Error saving patterns: {str(e)}")
+
 
     def predict_next_action(self, current_state: Dict) -> Optional[Dict]:
         """Predict optimal next action based on learned patterns"""

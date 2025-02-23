@@ -1034,12 +1034,16 @@ class FishingBot:
                 return True
 
             self.learning_mode = False
-            # Save learned patterns
-            success = self.gameplay_learner.save_patterns()
+            if not self.gameplay_learner:
+                self.logger.error("Gameplay learner not initialized")
+                return False
+
+            # Stop learning and save patterns
+            success = self.gameplay_learner.stop_learning()
             if success:
-                self.logger.info("Learning mode stopped, patterns saved successfully")
+                self.logger.info("Learning mode stopped and patterns saved successfully")
             else:
-                self.logger.warning("Learning mode stopped but failed to save patterns")
+                self.logger.error("Failed to stop learning mode or save patterns")
             return success
 
         except Exception as e:
