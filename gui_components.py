@@ -17,6 +17,7 @@ class MainWindow:
         self.master.resizable(False, False)
 
         self._create_gui()
+        self._create_styles()
         self._setup_logging()
         self._register_emergency_stop()
 
@@ -33,7 +34,7 @@ class MainWindow:
 
         # Emergency Stop
         self.emergency_stop_btn = ttk.Button(controls_frame, text="EMERGENCY STOP (F6)", 
-                                         command=self._emergency_stop, style="Emergency.TButton")
+                                            command=self._emergency_stop, style="Emergency.TButton")
         self.emergency_stop_btn.pack(fill="x", padx=5, pady=5)
 
         # Window Detection Frame
@@ -51,7 +52,7 @@ class MainWindow:
         detect_frame = ttk.Frame(window_frame)
         detect_frame.pack(fill="x", padx=5, pady=2)
         self.detect_window_btn = ttk.Button(detect_frame, text="Detect Window", 
-                                        command=self._detect_window)
+                                            command=self._detect_window)
         self.detect_window_btn.pack(side="left", padx=5)
         self.window_status_label = ttk.Label(detect_frame, text="No window detected")
         self.window_status_label.pack(side="left", padx=5)
@@ -64,10 +65,26 @@ class MainWindow:
         self.learning_status = ttk.Label(learning_frame, text="Learning: Inactive")
         self.learning_status.pack(padx=5, pady=2)
 
+        # Learning Controls Frame
+        learning_controls = ttk.Frame(learning_frame)
+        learning_controls.pack(fill="x", padx=5, pady=2)
+
         # Start/Stop Learning Button
-        self.learning_btn = ttk.Button(learning_frame, text="Start Learning", 
+        self.learning_btn = ttk.Button(learning_controls, text="Start Learning", 
                                    command=self._toggle_learning)
-        self.learning_btn.pack(fill="x", padx=5, pady=2)
+        self.learning_btn.pack(side="left", fill="x", expand=True, padx=2)
+
+        # Reset Learning Button
+        self.reset_learning_btn = ttk.Button(learning_controls, text="Reset Learning",
+                                             command=self._reset_learning,
+                                             style="Danger.TButton")
+        self.reset_learning_btn.pack(side="right", fill="x", expand=True, padx=2)
+
+        # Import Video Button
+        self.import_video_btn = ttk.Button(learning_frame, text="Import Training Video",
+                                       command=self._import_training_video)
+        self.import_video_btn.pack(fill="x", padx=5, pady=2)
+
 
         # Map Management Frame
         map_frame = ttk.LabelFrame(self.master, text="Map Management")
@@ -102,6 +119,12 @@ class MainWindow:
         log_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.log_display = scrolledtext.ScrolledText(log_frame, height=10)
         self.log_display.pack(fill="both", expand=True)
+
+    def _create_styles(self):
+        """Create custom styles for buttons"""
+        style = ttk.Style()
+        style.configure("Emergency.TButton", foreground="red", font=('bold'))
+        style.configure("Danger.TButton", foreground="orange", font=('bold'))
 
     def _setup_logging(self):
         self.logger = logging.getLogger('GUI')
@@ -255,3 +278,35 @@ class MainWindow:
         # To be implemented
         self.logger.info("Clearing obstacles...")
         pass
+
+    def _import_training_video(self):
+        """Import video file for AI training"""
+        file_path = filedialog.askopenfilename(
+            title="Select Training Video",
+            filetypes=[
+                ("Video Files", "*.mp4 *.avi *.mkv"),
+                ("All Files", "*.*")
+            ]
+        )
+        if file_path:
+            self.status_label.config(text="Processing Video...")
+            success = self.bot.gameplay_learner.import_video_for_training(file_path)
+            if success:
+                self.logger.info(f"Successfully processed training video: {file_path}")
+                self.status_label.config(text="Video Training Complete")
+            else:
+                self.logger.error("Failed to process training video")
+                self.status_label.config(text="Video Processing Failed")
+                messagebox.showerror("Error", "Failed to process training video")
+
+    def _reset_learning(self):
+        """Reset all learned patterns"""
+        if messagebox.askyesno("Confirm Reset", 
+                              "Are you sure you want to reset all learned patterns? " +
+                              "This cannot be undone."):
+            if self.bot.gameplay_learner.reset_learning():
+                self.logger.info("Successfully reset all learned patterns")
+                self.status_label.config(text="Learning Reset Complete")
+            else:
+                self.logger.error("Failed to reset learning patterns")
+                messagebox.showerror("Error", "Failed to reset learning patterns")

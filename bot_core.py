@@ -9,6 +9,7 @@ import random
 from vision_system import VisionSystem
 from pathfinding import PathFinder
 from gameplay_learner import GameplayLearner
+import torch # Added for AI model usage
 
 class FishingBot:
     def __init__(self, test_mode=False, test_env=None):
@@ -23,6 +24,7 @@ class FishingBot:
         self.ImageGrab = None
         self.win32gui = None
         self.win32process = None # Added for process ID retrieval
+        self.pyaudio = None # Added for sound recording
 
         self._init_dependencies()
         self._init_ai_components()
@@ -47,34 +49,36 @@ class FishingBot:
         self._load_default_config()
 
     def _init_dependencies(self):
-        """Initialize Windows-specific dependencies"""
+        """Initialize dependencies based on platform"""
         if self.test_mode:
             return
 
-        if platform.system() != 'Windows':
-            self.logger.error("This bot only works on Windows operating system")
-            raise SystemError("FishingBot requires Windows to run")
-
         try:
-            import pyautogui
             import cv2
             import numpy as np
             from PIL import ImageGrab
-            import win32gui
-            import win32process # Added for process ID retrieval
 
-            self.pyautogui = pyautogui
             self.cv2 = cv2
             self.np = np
             self.ImageGrab = ImageGrab
-            self.win32gui = win32gui
-            self.win32process = win32process # Added for process ID retrieval
 
-            # Configure PyAutoGUI safety settings
-            self.pyautogui.FAILSAFE = True
-            self.pyautogui.PAUSE = 0.1
+            # Only import Windows-specific modules when on Windows
+            if platform.system() == 'Windows':
+                import win32gui
+                import win32process
+                import pyautogui
 
-            self.logger.info("Successfully initialized Windows dependencies")
+                self.win32gui = win32gui
+                self.win32process = win32process
+                self.pyautogui = pyautogui
+
+                # Configure PyAutoGUI safety settings
+                self.pyautogui.FAILSAFE = True
+                self.pyautogui.PAUSE = 0.1
+            else:
+                self.logger.warning("Running on non-Windows platform. Some features will be limited.")
+
+            self.logger.info("Successfully initialized dependencies")
         except ImportError as e:
             self.logger.error(f"Failed to import required modules: {str(e)}")
             raise ImportError(f"Missing required module: {str(e)}")
@@ -111,11 +115,9 @@ class FishingBot:
 
     def find_game_window(self, window_title=None):
         """Find game window by title
-
         Args:
             window_title (str): Full or partial window title to match. If None, 
                                   will try to find any game window from common titles.
-
         Returns:
             tuple: (success, message)
                 - success (bool): True if window was found
@@ -157,7 +159,7 @@ class FishingBot:
         """Helper method to find window by title"""
         try:
             def callback(hwnd, extra):
-                if self.win32gui.IsWindowVisible(hwnd):
+                if self.win32gui and self.win32gui.IsWindowVisible(hwnd):
                     window_text = self.win32gui.GetWindowText(hwnd)
                     if title.lower() in window_text.lower():
                         self.window_handle = hwnd
@@ -165,17 +167,20 @@ class FishingBot:
                         return False
                 return True
 
-            self.win32gui.EnumWindows(callback, None)
+            if self.win32gui:
+                self.win32gui.EnumWindows(callback, None)
 
             if self.window_handle:
                 # Get additional window info
-                self.window_placement = self.win32gui.GetWindowPlacement(self.window_handle)
-                self.window_style = self.win32gui.GetWindowLong(self.window_handle, -16)  # GWL_STYLE
+                if self.win32gui:
+                    self.window_placement = self.win32gui.GetWindowPlacement(self.window_handle)
+                    self.window_style = self.win32gui.GetWindowLong(self.window_handle, -16)  # GWL_STYLE
 
                 # Get process info for debugging
                 try:
-                    _, pid = self.win32process.GetWindowThreadProcessId(self.window_handle)
-                    self.window_process_id = pid
+                    if self.win32process:
+                        _, pid = self.win32process.GetWindowThreadProcessId(self.window_handle)
+                        self.window_process_id = pid
                 except Exception as e:
                     self.logger.warning(f"Could not get process ID: {str(e)}")
                     self.window_process_id = None
@@ -215,9 +220,9 @@ class FishingBot:
 
         try:
             info = {
-                'title': self.win32gui.GetWindowText(self.window_handle),
+                'title': self.win32gui.GetWindowText(self.window_handle) if self.win32gui else "N/A",
                 'rect': self.window_rect,
-                'is_visible': self.win32gui.IsWindowVisible(self.window_handle),
+                'is_visible': self.win32gui.IsWindowVisible(self.window_handle) if self.win32gui else False,
                 'is_active': self.is_window_active(),
                 'process_id': getattr(self, 'window_process_id', None),
                 'placement': self.window_placement if hasattr(self, 'window_placement') else None
@@ -230,10 +235,8 @@ class FishingBot:
 
     def load_map_data(self, map_file):
         """Load map data from file for navigation
-
         Args:
-            map_file (str): Path to map data file (JSON, CSV, etc.)
-
+            map_file (str): Path to map data file (JSON, CSV, PNG, etc.)
         Returns:
             bool: True if map was loaded successfully
         """
@@ -256,7 +259,7 @@ class FishingBot:
                     self.logger.debug(f"Loaded JSON data: {len(map_data)} bytes")
                     if not self._validate_map_data(map_data):
                         return False
-                    self.pathfinder.update_map(map_data)  # Changed from load_map
+                    self.pathfinder.update_map(map_data)
                     self.logger.info(f"Successfully loaded JSON map with {len(map_data.get('nodes', []))} nodes")
                     return True
 
@@ -267,9 +270,12 @@ class FishingBot:
                     self.logger.debug(f"Loaded CSV data: {len(map_data)} rows")
                     if not self._validate_map_data(map_data, format='csv'):
                         return False
-                    self.pathfinder.update_map(map_data)  # Changed from load_map
+                    self.pathfinder.update_map(map_data)
                     self.logger.info(f"Successfully loaded CSV map with {len(map_data)} rows")
                     return True
+
+            elif file_path.suffix.lower() == '.png':
+                return self._load_png_map(file_path)
 
             else:
                 self.logger.error(f"Unsupported map file format: {file_path.suffix}")
@@ -279,13 +285,84 @@ class FishingBot:
             self.logger.error(f"Error loading map data: {str(e)}")
             return False
 
+    def _load_png_map(self, file_path):
+        """Load and process PNG map file
+        Args:
+            file_path: Path to PNG map file
+        Returns:
+            bool: True if map was loaded successfully
+        """
+        try:
+            # Read PNG file
+            image = self.cv2.imread(str(file_path)) if self.cv2 else None
+            if image is None:
+                self.logger.error("Failed to read PNG file")
+                return False
+
+            # Convert to grayscale
+            gray = self.cv2.cvtColor(image, self.cv2.COLOR_BGR2GRAY) if self.cv2 else None
+
+            # Create binary mask for walkable areas (assuming white/light areas are walkable)
+            _, binary = self.cv2.threshold(gray, 200, 255, self.cv2.THRESH_BINARY) if self.cv2 else None
+
+            # Find contours to identify regions
+            contours, _ = self.cv2.findContours(binary, self.cv2.RETR_EXTERNAL, self.cv2.CHAIN_APPROX_SIMPLE) if self.cv2 else ([], None)
+
+            # Convert image data to map nodes and edges
+            nodes = []
+            edges = []
+            node_id = 0
+
+            # Process each contour as a separate region
+            for contour in contours:
+                # Get contour moments for center point
+                M = self.cv2.moments(contour) if self.cv2 else None
+                if M and M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+
+                    # Add node for region center
+                    nodes.append({
+                        'id': node_id,
+                        'x': cx,
+                        'y': cy,
+                        'type': 'walkable'
+                    })
+
+                    # Connect to nearby nodes
+                    for prev_id in range(node_id):
+                        prev_node = nodes[prev_id]
+                        # Calculate distance between nodes
+                        dist = ((cx - prev_node['x'])**2 + (cy - prev_node['y'])**2)**0.5
+                        if dist < 100:  # Connect nodes within reasonable distance
+                            edges.append({
+                                'from': prev_id,
+                                'to': node_id,
+                                'weight': dist
+                            })
+
+                    node_id += 1
+
+            # Create map data structure
+            map_data = {
+                'nodes': nodes,
+                'edges': edges
+            }
+
+            # Update pathfinder with new map data
+            self.pathfinder.update_map(map_data)
+            self.logger.info(f"Successfully loaded PNG map with {len(nodes)} nodes and {len(edges)} edges")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error processing PNG map: {str(e)}")
+            return False
+
     def _validate_map_data(self, data, format='json'):
         """Validate map data structure
-
         Args:
             data: Map data to validate
             format: Format of the data ('json' or 'csv')
-
         Returns:
             bool: True if data is valid
         """
@@ -322,10 +399,8 @@ class FishingBot:
 
     def download_map_data(self, url):
         """Download map data from URL
-
         Args:
             url (str): URL to map data file
-
         Returns:
             bool: True if map was downloaded and loaded successfully
         """
@@ -410,8 +485,10 @@ class FishingBot:
             if not self.window_handle:
                 return False
 
-            active_window = self.win32gui.GetForegroundWindow()
-            return active_window == self.window_handle
+            if self.win32gui:
+                active_window = self.win32gui.GetForegroundWindow()
+                return active_window == self.window_handle
+            return False
 
         except Exception as e:
             self.logger.error(f"Error checking window focus: {str(e)}")
@@ -427,9 +504,10 @@ class FishingBot:
                 return False
 
             if not self.is_window_active():
-                self.win32gui.SetForegroundWindow(self.window_handle)
-                time.sleep(0.1)  # Wait for window activation
-                return self.is_window_active()
+                if self.win32gui:
+                    self.win32gui.SetForegroundWindow(self.window_handle)
+                    time.sleep(0.1)  # Wait for window activation
+                    return self.is_window_active()
             return True
 
         except Exception as e:
@@ -446,8 +524,8 @@ class FishingBot:
                 self.logger.warning("No window region set for screenshot")
                 return None
 
-            screenshot = self.ImageGrab.grab(bbox=self.window_rect)
-            return self.np.array(screenshot)
+            screenshot = self.ImageGrab.grab(bbox=self.window_rect) if self.ImageGrab else None
+            return self.np.array(screenshot) if self.np else None
 
         except Exception as e:
             self.logger.error(f"Error capturing window screenshot: {str(e)}")
@@ -597,11 +675,11 @@ class FishingBot:
             else:
                 # Capture screen
                 if self.window_rect:
-                    screen = self.ImageGrab.grab(bbox=self.window_rect)
+                    screen = self.ImageGrab.grab(bbox=self.window_rect) if self.ImageGrab else None
                 else:
                     self.logger.warning("Game window not found. Cannot capture screen.")
                     return [], []
-                frame = self.np.array(screen)
+                frame = self.np.array(screen) if self.np else None
 
                 # Detect objects
                 detections = self.vision_system.detect_objects(frame)
@@ -629,7 +707,7 @@ class FishingBot:
             return [], []
 
     def move_mouse_to(self, x, y, duration=None):
-        """Move mouse with test mode support"""
+        """Move mouse with test mode support and window coordinate translation"""
         try:
             if duration is None:
                 duration = self.config['mouse_movement_speed']
@@ -637,12 +715,40 @@ class FishingBot:
             if self.test_mode:
                 return self.test_env.move_mouse(x, y)
 
+            if not self.window_handle or not self.window_rect:
+                self.logger.error("Window not detected. Cannot move mouse.")
+                return False
+
+            # Translate coordinates relative to game window
+            window_x, window_y, _, _ = self.window_rect
+            target_x = window_x + x
+            target_y = window_y + y
+
             if self.pyautogui:
                 # Add slight randomization to prevent detection
-                x += random.uniform(-2, 2)
-                y += random.uniform(-2, 2)
-                self.pyautogui.moveTo(x, y, duration=duration)
-                self.logger.debug(f"Moved mouse to ({x}, {y})")
+                target_x += random.uniform(-2, 2)
+                target_y += random.uniform(-2, 2)
+
+                # Ensure window is active before moving mouse
+                if not self.is_window_active():
+                    self.activate_window()
+                    time.sleep(0.1)  # Wait for window activation
+
+                # Move mouse with bezier curve for more natural movement
+                current_x, current_y = self.pyautogui.position()
+                points = self._generate_bezier_curve(
+                    current_x, current_y, 
+                    target_x, target_y,
+                    num_points=20
+                )
+
+                # Move through points
+                for point_x, point_y in points:
+                    self.pyautogui.moveTo(point_x, point_y, duration/len(points))
+                    if self.stop_event.is_set():
+                        return False
+
+                self.logger.debug(f"Moved mouse to ({target_x}, {target_y})")
                 return True
             return False
 
@@ -650,14 +756,35 @@ class FishingBot:
             self.logger.error(f"Mouse movement error: {str(e)}")
             return False
 
+    def _generate_bezier_curve(self, x1, y1, x2, y2, num_points=20):
+        """Generate points along a bezier curve for smooth mouse movement"""
+        # Control points for the curve
+        control_x = x1 + (x2 - x1) * random.uniform(0.3, 0.7)
+        control_y = y1 + (y2 - y1) * random.uniform(0.3, 0.7)
+
+        points = []
+        for i in range(num_points):
+            t = i / (num_points - 1)
+            # Quadratic Bezier curve formula
+            x = (1-t)**2 * x1 + 2*(1-t)*t * control_x + t**2 * x2
+            y = (1-t)**2 * y1 + 2*(1-t)*t * control_y + t**2 * y2
+            points.append((int(x), int(y)))
+
+        return points
+
     def click(self, x=None, y=None, button='left', clicks=1, interval=None):
-        """Perform mouse click with optional position"""
+        """Perform mouse click with optional position and window coordinate translation"""
         try:
             if interval is None:
                 interval = self.config['click_delay']
 
             if x is not None and y is not None:
-                self.move_mouse_to(x, y)
+                if not self.move_mouse_to(x, y):
+                    return False
+
+            if not self.window_handle:
+                self.logger.error("Window not detected. Cannot click.")
+                return False
 
             if clicks == 2:
                 interval = self.config['double_click_interval']
@@ -666,6 +793,14 @@ class FishingBot:
                 return self.test_env.click(button, clicks)
 
             if self.pyautogui:
+                # Ensure window is active
+                if not self.is_window_active():
+                    self.activate_window()
+                    time.sleep(0.1)
+
+                # Add slight random delay for more natural clicking
+                time.sleep(random.uniform(0, 0.1))
+
                 self.pyautogui.click(clicks=clicks, interval=interval, button=button)
                 self.logger.debug(f"Clicked at current position, button={button}, clicks={clicks}")
                 return True
@@ -706,9 +841,11 @@ class FishingBot:
             self.move_mouse_to(start_x, start_y)
 
             # Perform drag
-            self.pyautogui.dragTo(end_x, end_y, duration=duration)
-            self.logger.debug(f"Dragged mouse from ({start_x}, {start_y}) to ({end_x}, {end_y})")
-            return True
+            if self.pyautogui:
+                self.pyautogui.dragTo(end_x, end_y, duration=duration)
+                self.logger.debug(f"Dragged mouse from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+                return True
+            return False
         except Exception as e:
             self.logger.error(f"Mouse drag error: {str(e)}")
             return False
@@ -728,16 +865,16 @@ class FishingBot:
                 return False
 
             # Capture screen in detection area
-            screen = self.ImageGrab.grab(bbox=self.config['detection_area'])
-            screen_np = self.np.array(screen)
+            screen = self.ImageGrab.grab(bbox=self.config['detection_area']) if self.ImageGrab else None
+            screen_np = self.np.array(screen) if self.np else None
 
             if self.config['use_ai']:
                 # Use AI-based detection when enabled
                 return self._ai_detect_bite(screen_np)
             else:
                 # Simple color threshold detection
-                mask = self.np.all(screen_np >= self.config['color_threshold'], axis=-1)
-                return bool(self.np.any(mask))
+                mask = self.np.all(screen_np >= self.config['color_threshold'], axis=-1) if self.np else False
+                return bool(self.np.any(mask)) if self.np else False
 
         except Exception as e:
             self.logger.error(f"Error in bite detection: {str(e)}")
@@ -748,7 +885,7 @@ class FishingBot:
         try:
             # Convert to RGB for the feature extractor
             if len(screen_image.shape) == 2:  # If grayscale
-                screen_image = self.cv2.cvtColor(screen_image, self.cv2.COLOR_GRAY2RGB)
+                screen_image = self.cv2.cvtColor(screen_image, self.cv2.COLOR_GRAY2RGB) if self.cv2 else None
             elif screen_image.shape[2] == 4:  # If RGBA
                 screen_image = screen_image[:, :, :3]  # Convert to RGB
 
@@ -767,12 +904,12 @@ class FishingBot:
                     return True
 
             # Fallback to CV-based detection
-            gray = self.cv2.cvtColor(screen_image, self.cv2.COLOR_RGB2GRAY)
-            edges = self.cv2.Canny(gray, 100, 200)
-            contours, _ = self.cv2.findContours(edges, self.cv2.RETR_EXTERNAL, self.cv2.CHAIN_APPROX_SIMPLE)
+            gray = self.cv2.cvtColor(screen_image, self.cv2.COLOR_RGB2GRAY) if self.cv2 else None
+            edges = self.cv2.Canny(gray, 100, 200) if self.cv2 else None
+            contours, _ = self.cv2.findContours(edges, self.cv2.RETR_EXTERNAL, self.cv2.CHAIN_APPROX_SIMPLE) if self.cv2 else ([], None)
 
             for contour in contours:
-                area = self.cv2.contourArea(contour)
+                area = self.cv2.contourArea(contour) if self.cv2 else 0
                 if area > 100:  # Minimum area threshold
                     return True
 
@@ -787,39 +924,42 @@ class FishingBot:
         try:
             self.logger.info("Starting bite sound recording...")
             # Initialize PyAudio
-            p = self.pyaudio.PyAudio()
+            if self.pyaudio:
+                p = self.pyaudio.PyAudio()
 
-            # Set recording parameters
-            FORMAT = self.pyaudio.paFloat32
-            CHANNELS = 1
-            RATE = 44100
-            CHUNK = 1024
-            RECORD_SECONDS = 3
+                # Set recording parameters
+                FORMAT = self.pyaudio.paFloat32
+                CHANNELS = 1
+                RATE = 44100
+                CHUNK = 1024
+                RECORD_SECONDS = 3
 
-            # Start recording
-            stream = p.open(format=FORMAT,
-                                     channels=CHANNELS,
-                                     rate=RATE,
-                                     input=True,
-                                     frames_per_buffer=CHUNK)
+                # Start recording
+                stream = p.open(format=FORMAT,
+                                         channels=CHANNELS,
+                                         rate=RATE,
+                                         input=True,
+                                         frames_per_buffer=CHUNK)
 
-            self.logger.info("Recording...")
-            frames = []
+                self.logger.info("Recording...")
+                frames = []
 
-            for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-                data = stream.read(CHUNK)
-                frames.append(data)
+                for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+                    data = stream.read(CHUNK)
+                    frames.append(data)
 
-            self.logger.info("Finished recording")
+                self.logger.info("Finished recording")
 
-            # Stop and close the stream
-            stream.stop_stream()
-            stream.close()
-            p.terminate()
+                # Stop and close the stream
+                stream.stop_stream()
+                stream.close()
+                p.terminate()
 
-            # Save the recorded data
-            # TODO: Implement save functionality
-            self.logger.info("Saved recorded sound")
+                # Save the recorded data
+                # TODO: Implement save functionality
+                self.logger.info("Saved recorded sound")
+            else:
+                self.logger.warning("pyaudio not initialized. Skipping sound recording.")
 
         except Exception as e:
             self.logger.error(f"Error recording sound: {str(e)}")

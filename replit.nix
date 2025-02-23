@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.portaudio
     pkgs.unzip
     pkgs.libGLU
     pkgs.libGL

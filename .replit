@@ -19,6 +19,10 @@ args = "Fishing Bot"
 task = "workflow.run"
 args = "Test Bot"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Fishing Bot Test"
+
 [[workflows.workflow]]
 name = "Fishing Bot"
 author = "agent"
@@ -32,6 +36,7 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python fishing_bot.py"
+waitForPort = 5000
 
 [[workflows.workflow]]
 name = "Test Bot"
@@ -46,6 +51,20 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python -m unittest test_bot.py -v"
+
+[[workflows.workflow]]
+name = "Fishing Bot Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python fishing_bot.py"
 
 [deployment]
 run = ["sh", "-c", "python fishing_bot.py"]
