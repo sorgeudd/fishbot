@@ -41,8 +41,12 @@ echo Installing PyAutoGUI...
 pip install pyautogui
 if errorlevel 1 goto error
 
-echo Installing Requests...
-pip install requests
+echo Installing Torch...
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+if errorlevel 1 goto error
+
+echo Installing Transformers...
+pip install transformers
 if errorlevel 1 goto error
 
 echo.
@@ -51,7 +55,7 @@ echo    Installation Complete!
 echo ===================================
 echo.
 echo To start the Fishing Bot:
-echo 1. Double click on 'fishing_bot.py'
+echo 1. Double click on 'start_bot.bat'
 echo    OR
 echo 2. Run 'python fishing_bot.py' in terminal
 echo.

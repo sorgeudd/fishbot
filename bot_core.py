@@ -4,6 +4,8 @@ from threading import Thread, Event
 import time
 import sys
 from pathlib import Path
+import torch
+from transformers import AutoModelForImageClassification, AutoFeatureExtractor
 
 class FishingBot:
     def __init__(self):
@@ -48,7 +50,7 @@ class FishingBot:
             'cast_power': 50,
             'game_window': None,
             'obstacles': [],
-            'use_ai': False,
+            'use_ai': True,  # Enable AI by default
             'pattern_matching': True
         }
 
@@ -60,7 +62,18 @@ class FishingBot:
             model_dir.mkdir(exist_ok=True)
 
             self.logger.info("Initializing machine learning models")
-            self.logger.info("Initializing AI inference system")
+
+            # Initialize Hugging Face model and feature extractor
+            try:
+                model_name = "microsoft/resnet-50"  # Using ResNet-50 for image classification
+                self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+                self.model = AutoModelForImageClassification.from_pretrained(model_name)
+                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                self.model.to(self.device)
+                self.logger.info(f"Loaded AI model: {model_name}")
+            except Exception as e:
+                self.logger.warning(f"Failed to load Hugging Face model: {str(e)}")
+                self.config['use_ai'] = False
 
             # Load pattern matching
             pattern_file = model_dir / "patterns.json"
@@ -144,16 +157,33 @@ class FishingBot:
             return False
 
     def _ai_detect_bite(self, screen_image):
-        """AI-based bite detection"""
+        """AI-based bite detection using both CV and Hugging Face model"""
         try:
-            # Convert to grayscale for processing
-            gray = self.cv2.cvtColor(screen_image, self.cv2.COLOR_RGB2GRAY)
+            # Convert to RGB for the feature extractor
+            if len(screen_image.shape) == 2:  # If grayscale
+                screen_image = self.cv2.cvtColor(screen_image, self.cv2.COLOR_GRAY2RGB)
+            elif screen_image.shape[2] == 4:  # If RGBA
+                screen_image = screen_image[:, :, :3]  # Convert to RGB
 
-            # Apply basic computer vision techniques
+            # Use Hugging Face model for prediction
+            if self.config['use_ai'] and hasattr(self, 'feature_extractor'):
+                inputs = self.feature_extractor(screen_image, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    predictions = outputs.logits.softmax(-1)
+                    confidence = predictions.max().item()
+
+                if confidence > self.config['detection_threshold']:
+                    self.logger.debug(f"AI detected bite with confidence: {confidence:.2f}")
+                    return True
+
+            # Fallback to CV-based detection
+            gray = self.cv2.cvtColor(screen_image, self.cv2.COLOR_RGB2GRAY)
             edges = self.cv2.Canny(gray, 100, 200)
             contours, _ = self.cv2.findContours(edges, self.cv2.RETR_EXTERNAL, self.cv2.CHAIN_APPROX_SIMPLE)
 
-            # Analyze contours for potential bite indicators
             for contour in contours:
                 area = self.cv2.contourArea(contour)
                 if area > 100:  # Minimum area threshold
