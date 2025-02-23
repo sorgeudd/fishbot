@@ -31,26 +31,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Checking and upgrading pip...
-python -m pip install --upgrade pip
-if errorlevel 1 goto error
-
-echo.
-echo Creating virtual environment...
-python -m venv venv
-if errorlevel 1 (
-    echo Failed to create virtual environment
-    goto error
-)
-
-echo Activating virtual environment...
-call venv\Scripts\activate.bat
-if errorlevel 1 (
-    echo Failed to activate virtual environment
-    goto error
-)
-
-echo.
 echo Installing required packages...
 echo This might take a few minutes...
 
@@ -74,16 +54,10 @@ echo Installing PyAudio...
 pip install pyaudio
 if errorlevel 1 (
     echo PyAudio installation failed. 
-    echo Attempting alternative installation method...
-    python -m pip install pipwin
-    pipwin install pyaudio
-    if errorlevel 1 (
-        echo PyAudio installation failed. 
-        echo You might need to install Microsoft Visual C++ Build Tools
-        echo Visit: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-        pause
-        exit /b 1
-    )
+    echo You might need to install Microsoft Visual C++ Build Tools
+    echo Visit: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+    pause
+    exit /b 1
 )
 
 echo Installing PyAutoGUI...
@@ -130,12 +104,6 @@ echo.
 echo Note: Make sure to run as Administrator
 echo for proper keyboard control functionality
 echo.
-echo If you encounter any issues:
-echo 1. Check if all dependencies are installed correctly
-echo 2. Verify you have administrator privileges
-echo 3. Make sure your antivirus isn't blocking the bot
-echo 4. Check the documentation for troubleshooting
-echo.
 pause
 
 exit /b 0
@@ -148,11 +116,6 @@ echo 1. Your internet connection
 echo 2. If you have administrator privileges
 echo 3. If any antivirus is blocking the installation
 echo 4. If Microsoft Visual C++ Build Tools are installed
-echo.
-echo For additional help:
-echo - Check the documentation
-echo - Visit our GitHub page for known issues
-echo - Run the script as administrator
 echo.
 pause
 exit /b 1
