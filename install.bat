@@ -34,10 +34,6 @@ echo.
 echo Installing required packages...
 echo This might take a few minutes...
 
-echo Installing Win32GUI...
-pip install pywin32
-if errorlevel 1 goto error
-
 echo Installing numpy...
 pip install numpy
 if errorlevel 1 goto error
@@ -50,16 +46,6 @@ echo Installing Pillow...
 pip install pillow
 if errorlevel 1 goto error
 
-echo Installing PyAudio...
-pip install pyaudio
-if errorlevel 1 (
-    echo PyAudio installation failed. 
-    echo You might need to install Microsoft Visual C++ Build Tools
-    echo Visit: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-    pause
-    exit /b 1
-)
-
 echo Installing PyAutoGUI...
 pip install pyautogui
 if errorlevel 1 goto error
@@ -70,6 +56,14 @@ if errorlevel 1 goto error
 
 echo Installing Transformers...
 pip install transformers
+if errorlevel 1 goto error
+
+echo Installing Trafilatura...
+pip install trafilatura
+if errorlevel 1 goto error
+
+echo Installing Twilio...
+pip install twilio
 if errorlevel 1 goto error
 
 REM Check Visual C++ Redistributable
@@ -84,7 +78,7 @@ if errorlevel 1 (
 REM Verify installations
 echo.
 echo Verifying installations...
-python -c "import win32gui; import numpy; import cv2; import PIL; import pyautogui; import torch; import transformers" > nul 2>&1
+python -c "import numpy; import cv2; import PIL; import pyautogui; import torch; import transformers; import trafilatura; import twilio" > nul 2>&1
 if errorlevel 1 (
     echo Error: Some dependencies failed to install correctly
     echo Please check the error messages above and try again
