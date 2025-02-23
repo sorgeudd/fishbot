@@ -67,7 +67,7 @@ class MockEnvironment:
         """Record mouse movement"""
         return self.record_input('mouse_move', x=x, y=y)
 
-    def click_mouse(self, button='left', clicks=1):
+    def click(self, button='left', clicks=1):
         """Record mouse click"""
         return self.record_input('mouse_click', button=button, clicks=clicks)
 
@@ -79,10 +79,11 @@ class MockEnvironment:
         """Get current game state data"""
         return {
             'health': self.state.health,
-            'position': self.state.current_position,
+            'current_position': self.state.current_position,
             'in_combat': self.state.is_in_combat,
-            'resources': self.state.detected_resources,
-            'obstacles': self.state.detected_obstacles
+            'resources': self.state.detected_resources or [],
+            'obstacles': self.state.detected_obstacles or [],
+            'fish_bite_active': self.state.fish_bite_active
         }
 
     def set_game_state(self, **kwargs):

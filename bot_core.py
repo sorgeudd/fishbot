@@ -5,11 +5,10 @@ from threading import Thread, Event
 import time
 import sys
 from pathlib import Path
-import torch
-import pyautogui
 import random
 from vision_system import VisionSystem
 from pathfinding import PathFinder
+from gameplay_learner import GameplayLearner
 
 class FishingBot:
     def __init__(self, test_mode=False, test_env=None):
@@ -17,14 +16,11 @@ class FishingBot:
         self.test_mode = test_mode
         self.test_env = test_env
 
-        # Configure PyAutoGUI safety settings
-        pyautogui.FAILSAFE = True
-        pyautogui.PAUSE = 0.1
-
-        if test_mode and test_env is None:
-            from mock_environment import create_test_environment
-            self.test_env = create_test_environment()
-            self.logger.info("Created new test environment")
+        # Only import GUI dependencies when needed
+        self.pyautogui = None
+        self.cv2 = None
+        self.np = None
+        self.ImageGrab = None
 
         if not test_mode:
             # Regular Windows environment setup
@@ -34,12 +30,18 @@ class FishingBot:
 
             # Import Windows-specific dependencies
             try:
-                from PIL import ImageGrab
-                import numpy as np
+                import pyautogui
                 import cv2
-                self.ImageGrab = ImageGrab
-                self.np = np
+                import numpy as np
+                from PIL import ImageGrab
+                self.pyautogui = pyautogui
                 self.cv2 = cv2
+                self.np = np
+                self.ImageGrab = ImageGrab
+
+                # Configure PyAutoGUI safety settings
+                self.pyautogui.FAILSAFE = True
+                self.pyautogui.PAUSE = 0.1
             except ImportError as e:
                 self.logger.error(f"Failed to import required modules: {str(e)}")
                 raise ImportError("Missing required modules")
@@ -55,6 +57,11 @@ class FishingBot:
         # Initialize pathfinding
         self.pathfinder = PathFinder(grid_size=32)
         self.logger.info("PathFinder initialized with grid size: 32")
+
+        # Initialize gameplay learning
+        self.gameplay_learner = GameplayLearner()
+        self.learning_mode = False
+        self.adaptive_mode = False
 
         # Default configuration
         self.config = {
@@ -80,7 +87,8 @@ class FishingBot:
                 'left': 'a',
                 'right': 'd',
                 'mount': 'y'
-            }
+            },
+            'learning_duration': 3600  # 1 hour default learning duration
         }
 
     def _init_ai_components(self):
@@ -256,13 +264,15 @@ class FishingBot:
             if self.test_mode:
                 return self.test_env.move_mouse(x, y)
 
-            # Add slight randomization to prevent detection
-            x += random.uniform(-2, 2)
-            y += random.uniform(-2, 2)
+            if self.pyautogui:
+                # Add slight randomization to prevent detection
+                x += random.uniform(-2, 2)
+                y += random.uniform(-2, 2)
+                self.pyautogui.moveTo(x, y, duration=duration)
+                self.logger.debug(f"Moved mouse to ({x}, {y})")
+                return True
+            return False
 
-            pyautogui.moveTo(x, y, duration=duration)
-            self.logger.debug(f"Moved mouse to ({x}, {y})")
-            return True
         except Exception as e:
             self.logger.error(f"Mouse movement error: {str(e)}")
             return False
@@ -279,9 +289,15 @@ class FishingBot:
             if clicks == 2:
                 interval = self.config['double_click_interval']
 
-            pyautogui.click(clicks=clicks, interval=interval, button=button)
-            self.logger.debug(f"Clicked at current position, button={button}, clicks={clicks}")
-            return True
+            if self.test_mode:
+                return self.test_env.click(button, clicks)
+
+            if self.pyautogui:
+                self.pyautogui.click(clicks=clicks, interval=interval, button=button)
+                self.logger.debug(f"Clicked at current position, button={button}, clicks={clicks}")
+                return True
+            return False
+
         except Exception as e:
             self.logger.error(f"Click error: {str(e)}")
             return False
@@ -292,14 +308,17 @@ class FishingBot:
             if self.test_mode:
                 return self.test_env.press_key(key, duration)
 
-            if duration:
-                pyautogui.keyDown(key)
-                time.sleep(duration)
-                pyautogui.keyUp(key)
-            else:
-                pyautogui.press(key)
-            self.logger.debug(f"Pressed key: {key}, duration: {duration}")
-            return True
+            if self.pyautogui:
+                if duration:
+                    self.pyautogui.keyDown(key)
+                    time.sleep(duration)
+                    self.pyautogui.keyUp(key)
+                else:
+                    self.pyautogui.press(key)
+                self.logger.debug(f"Pressed key: {key}, duration: {duration}")
+                return True
+            return False
+
         except Exception as e:
             self.logger.error(f"Key press error: {str(e)}")
             return False
@@ -314,7 +333,7 @@ class FishingBot:
             self.move_mouse_to(start_x, start_y)
 
             # Perform drag
-            pyautogui.dragTo(end_x, end_y, duration=duration)
+            self.pyautogui.dragTo(end_x, end_y, duration=duration)
             self.logger.debug(f"Dragged mouse from ({start_x}, {start_y}) to ({end_x}, {end_y})")
             return True
         except Exception as e:
@@ -326,7 +345,7 @@ class FishingBot:
         try:
             if self.test_mode:
                 state = self.test_env.get_screen_region()
-                return state['fish_bite_active']
+                return bool(state.get('fish_bite_active', False))
 
             if not self.config['game_window']:
                 self.logger.warning("Game window not set")
@@ -342,7 +361,7 @@ class FishingBot:
             else:
                 # Simple color threshold detection
                 mask = self.np.all(screen_np >= self.config['color_threshold'], axis=-1)
-                return self.np.any(mask)
+                return bool(self.np.any(mask))
 
         except Exception as e:
             self.logger.error(f"Error in bite detection: {str(e)}")
@@ -403,10 +422,10 @@ class FishingBot:
 
             # Start recording
             stream = p.open(format=FORMAT,
-                              channels=CHANNELS,
-                              rate=RATE,
-                              input=True,
-                              frames_per_buffer=CHUNK)
+                                 channels=CHANNELS,
+                                 rate=RATE,
+                                 input=True,
+                                 frames_per_buffer=CHUNK)
 
             self.logger.info("Recording...")
             frames = []
@@ -498,39 +517,127 @@ class FishingBot:
         self.stop()
         self.logger.warning("Emergency stop activated")
 
+    def start_learning_mode(self):
+        """Start recording player actions to learn patterns"""
+        self.learning_mode = True
+        self.adaptive_mode = False
+        self.gameplay_learner.start_learning()
+        self.logger.info("Started learning mode")
+
+        # Start timer to automatically stop learning
+        def auto_stop():
+            time.sleep(self.config['learning_duration'])
+            if self.learning_mode:
+                self.stop_learning_mode()
+
+        Thread(target=auto_stop, daemon=True).start()
+
+    def stop_learning_mode(self):
+        """Stop learning mode and analyze patterns"""
+        if not self.learning_mode:
+            return
+
+        self.learning_mode = False
+        self.gameplay_learner.stop_learning()
+        self.logger.info("Stopped learning mode and analyzed patterns")
+
+    def start_adaptive_mode(self):
+        """Start using learned patterns for gameplay"""
+        self.adaptive_mode = True
+        self.learning_mode = False
+        self.logger.info("Started adaptive gameplay mode")
+
+    def record_action(self, action_type, position, **kwargs):
+        """Record player action during learning mode"""
+        if self.learning_mode:
+            self.gameplay_learner.record_action(action_type, position, **kwargs)
+
+    def get_next_action(self):
+        """Get next optimal action based on learned patterns"""
+        if not self.adaptive_mode:
+            return None
+
+        current_state = {
+            'health': self.get_current_health(),
+            'in_combat': self.check_combat_status(),
+            'is_mounted': False,  # TODO: Implement mount detection
+            'detected_resources': self.scan_for_resources(),
+            'detected_obstacles': self.scan_for_obstacles()
+        }
+
+        return self.gameplay_learner.predict_next_action(current_state)
+
+
     def _bot_loop(self):
         while not self.stop_event.is_set():
             try:
-                # Get cast power and add randomization
-                cast_power = self.config.get('cast_power', 50)
-                cast_power += random.uniform(-5, 5)  # Add variation
-                cast_power = max(0, min(100, cast_power))  # Clamp between 0 and 100
+                if self.adaptive_mode:
+                    # Get AI-recommended action
+                    next_action = self.get_next_action()
+                    if next_action:
+                        action_type = next_action['type']
 
-                # Cast fishing line with variable timing
-                self.press_key(self.config['cast_key'], duration=cast_power/100.0)
-                time.sleep(random.uniform(1.8, 2.2))  # Randomized delay
+                        if action_type == 'move':
+                            # Execute movement pattern
+                            target_pos = next_action['pattern'].get('position')
+                            if target_pos:
+                                self.navigate_to(target_pos)
 
-                # Wait for fish bite
-                while not self.stop_event.is_set():
-                    if self._detect_bite():
-                        # Add random delay before reeling
-                        time.sleep(random.uniform(0.1, 0.3))
+                        elif action_type == 'gather':
+                            # Find and gather resources
+                            resources = self.scan_for_resources()
+                            if resources:
+                                for resource in resources:
+                                    self.navigate_to(resource['position'])
+                                    # Add gathering action
+                                    self.click()
+                                    time.sleep(next_action['timing'])
 
-                        # Reel in fish with randomized timing
-                        self.press_key(self.config['reel_key'])
-                        time.sleep(random.uniform(2.8, 3.2))
-                        break
-                    time.sleep(0.1)
+                        elif action_type == 'combat':
+                            if self.check_combat_status():
+                                self._handle_combat()
 
-                # Scan for resources periodically
+                else:
+                    # Regular fishing bot behavior
+                    # Get cast power and add randomization
+                    cast_power = self.config.get('cast_power', 50)
+                    cast_power += random.uniform(-5, 5)  # Add variation
+                    cast_power = max(0, min(100, cast_power))  # Clamp between 0 and 100
+
+                    # Cast fishing line with variable timing
+                    self.press_key(self.config['cast_key'], duration=cast_power/100.0)
+                    time.sleep(random.uniform(1.8, 2.2))  # Randomized delay
+
+                    # Wait for fish bite
+                    while not self.stop_event.is_set():
+                        if self._detect_bite():
+                            # Add random delay before reeling
+                            time.sleep(random.uniform(0.1, 0.3))
+
+                            # Reel in fish with randomized timing
+                            self.press_key(self.config['reel_key'])
+                            time.sleep(random.uniform(2.8, 3.2))
+                            break
+                        time.sleep(0.1)
+
+                    # Record action if in learning mode
+                    if self.learning_mode:
+                        self.record_action('fish', self.get_current_position(),
+                                        success_rate=1.0)  # TODO: Implement success detection
+
+                # Scan for resources and handle combat periodically
                 time.sleep(self.config['resource_scan_interval'])
                 resources, obstacles = self.scan_surroundings()
-                if resources:
+
+                if self.check_combat_status():
+                    self._handle_combat()
+                elif resources:
                     for resource in resources:
                         self.navigate_to(resource['position'])
-                        # Add logic to gather the resource
-                        self.logger.info(f"Gathered {resource['type']} at {resource['position']}")
-
+                        # Record gathering action if in learning mode
+                        if self.learning_mode:
+                            self.record_action('gather', resource['position'],
+                                            resource_type=resource['type'])
 
             except Exception as e:
                 self.logger.error(f"Error in bot loop: {str(e)}")

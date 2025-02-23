@@ -23,6 +23,49 @@ class TestFishingBot(unittest.TestCase):
         self.assertTrue(self.bot.test_mode)
         self.assertFalse(self.bot.running)
 
+    def test_learning_mode(self):
+        """Test gameplay learning functionality"""
+        # Start learning mode
+        self.bot.start_learning_mode()
+        self.assertTrue(self.bot.learning_mode)
+        self.assertFalse(self.bot.adaptive_mode)
+
+        # Simulate some actions
+        self.bot.move_mouse_to(100, 200)
+        self.bot.click()
+        self.bot.press_key('f')
+
+        # Wait for a few actions to be recorded
+        time.sleep(2)
+
+        # Stop learning mode
+        self.bot.stop_learning_mode()
+        self.assertFalse(self.bot.learning_mode)
+
+        # Verify patterns were learned
+        self.assertTrue(hasattr(self.bot.gameplay_learner, 'recorded_actions'))
+        self.assertGreater(len(self.bot.gameplay_learner.recorded_actions), 0)
+
+    def test_adaptive_mode(self):
+        """Test adaptive gameplay based on learned patterns"""
+        # First learn some patterns
+        self.bot.start_learning_mode()
+        self.bot.move_mouse_to(100, 200)
+        self.bot.press_key('f')
+        time.sleep(1)
+        self.bot.stop_learning_mode()
+
+        # Start adaptive mode
+        self.bot.start_adaptive_mode()
+        self.assertTrue(self.bot.adaptive_mode)
+        self.assertFalse(self.bot.learning_mode)
+
+        # Get next action recommendation
+        next_action = self.bot.get_next_action()
+        if next_action:
+            self.assertIn('type', next_action)
+            self.assertIn('timing', next_action)
+
     def test_input_control(self):
         """Test basic input controls"""
         # Test mouse movement
@@ -74,10 +117,14 @@ class TestFishingBot(unittest.TestCase):
         self.assertEqual(len(detected), 1)
         self.assertEqual(detected[0]['type'], 'herb')
 
-    def test_full_fishing_cycle(self):
-        """Test complete fishing cycle"""
+    def test_full_gameplay_cycle(self):
+        """Test complete gameplay cycle with learning"""
+        # Start learning mode
+        self.bot.start_learning_mode()
+
+        # Start bot
         self.bot.start()
-        time.sleep(2)  # Allow time for one cycle
+        time.sleep(1)  # Allow time for one cycle
 
         # Verify fishing actions occurred
         input_events = self.mock_env.input_events
@@ -86,6 +133,17 @@ class TestFishingBot(unittest.TestCase):
 
         self.assertGreater(len(cast_events), 0, "No casting occurred")
         self.assertGreater(len(reel_events), 0, "No reeling occurred")
+
+        # Stop learning and switch to adaptive mode
+        self.bot.stop_learning_mode()
+        self.bot.start_adaptive_mode()
+
+        # Let it run in adaptive mode
+        time.sleep(1)
+
+        # Verify adaptive actions
+        adaptive_events = self.mock_env.input_events[len(input_events):]
+        self.assertGreater(len(adaptive_events), 0, "No adaptive actions occurred")
 
         self.bot.stop()
 
