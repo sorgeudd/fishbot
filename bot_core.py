@@ -10,6 +10,7 @@ import json
 import pyaudio
 import wave
 import numpy as np
+import traceback
 from collections import deque
 
 try:
@@ -285,6 +286,40 @@ class FishingBot:
         except Exception as e:
             self.logger.error(f"Error loading sound triggers: {e}")
             self.sound_triggers = {}
+
+    def add_sound_trigger(self, trigger_name, action=None):
+        """Add or update a sound trigger with associated action
+        Args:
+            trigger_name: Name of the trigger
+            action: Callable action to execute when trigger activates
+        Returns:
+            bool: True if trigger was added successfully
+        """
+        try:
+            if not trigger_name:
+                self.logger.error("No trigger name provided")
+                return False
+
+            if trigger_name not in self.sound_triggers:
+                self.logger.error(f"No recorded sound pattern found for trigger: {trigger_name}")
+                return False
+
+            if action is None:
+                self.logger.error("No action provided for trigger")
+                return False
+
+            # Update the trigger with the action
+            self.sound_triggers[trigger_name]['action'] = action
+            self.logger.info(f"Added action to sound trigger: {trigger_name}")
+
+            # Save updated triggers
+            self._save_sound_triggers()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error adding sound trigger: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
 
     def get_window_info(self):
         """Get detailed information about the current game window"""

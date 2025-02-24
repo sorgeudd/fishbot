@@ -290,7 +290,6 @@ class MainWindow:
             # Keep the console handler if GUI logging fails
 
 
-
     def _toggle_learning(self):
         """Toggle learning mode on/off"""
         try:
@@ -330,6 +329,9 @@ class MainWindow:
     def _register_emergency_stop(self):
         """Register emergency stop hotkey"""
         try:
+            # Register at root window level
+            self.master.bind_all('<F6>', lambda e: self._emergency_stop())
+            # Also register locally for redundancy
             self.master.bind('<F6>', lambda e: self._emergency_stop())
             self.logger.info("Emergency stop hotkey (F6) registered")
         except Exception as e:
@@ -339,15 +341,33 @@ class MainWindow:
         """Handle emergency stop"""
         try:
             self.logger.warning("Emergency stop activated")
+            # Stop all ongoing operations
+            if self.capture_mouse:
+                self.capture_mouse = False
+                self.logger.info("Stopped mouse capture")
+
+            if self.bot.recording_macro:
+                self.bot.stop_macro_recording()
+                self.record_macro_btn.config(text="Record Macro")
+                self.logger.info("Stopped macro recording")
+
             self.bot.stop()
             if self.bot.learning_mode:
                 self.bot.stop_learning()
                 self.learning_btn.config(text="Start Learning")
                 self.learning_status.config(text="Learning: Inactive")
+
             self.status_label.config(text="Emergency Stop Activated")
             self.start_bot_btn.config(text="Start Bot", command=self._start_bot, state="normal")
+
+            # Re-enable all buttons
+            self.play_macro_btn.config(state="normal")
+            self.learning_btn.config(state="normal")
+
+            messagebox.showinfo("Emergency Stop", "Bot operations have been stopped")
         except Exception as e:
             self.logger.error(f"Error during emergency stop: {str(e)}")
+            messagebox.showerror("Error", f"Emergency stop failed: {str(e)}")
 
     def _detect_window(self):
         """Detect game window"""
@@ -514,7 +534,7 @@ class MainWindow:
 
             action_type = self.action_type.get()
 
-            # Handle different action types
+            # Create the action function based on type
             if action_type == "Key Press":
                 action_key = self.action_key_entry.get().strip()
                 if not action_key:
@@ -534,18 +554,22 @@ class MainWindow:
                 action = lambda: self.bot.play_macro(macro_name)
                 self.logger.info(f"Creating macro trigger for macro: {macro_name}")
 
-            # Save trigger
-            if self.bot.add_sound_trigger(trigger_name, action):
+            # Save trigger with action
+            success = self.bot.add_sound_trigger(trigger_name, action)
+
+            if success:
                 self.status_label.config(text="Trigger Saved")
                 self.logger.info(f"Saved sound trigger: {trigger_name}")
                 self.trigger_name_entry.delete(0, tk.END)
                 self.action_key_entry.delete(0, tk.END)
                 self._update_sound_list()
             else:
+                self.logger.error("Failed to save trigger")
                 messagebox.showerror("Error", "Failed to save trigger")
 
         except Exception as e:
             self.logger.error(f"Error saving sound trigger: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
             messagebox.showerror("Error", f"Failed to save trigger: {str(e)}")
 
     def _toggle_macro_recording(self):
@@ -602,20 +626,27 @@ class MainWindow:
                 x = self.master.winfo_pointerx()
                 y = self.master.winfo_pointery()
 
-                # Get window position
+                # Get window position and size
                 win_x = self.master.winfo_rootx()
                 win_y = self.master.winfo_rooty()
+                win_width = self.master.winfo_width()
+                win_height = self.master.winfo_height()
 
                 # Convert to window coordinates
                 rel_x = x - win_x
                 rel_y = y - win_y
 
-                # Record the position with detailed logging
-                self.bot.record_action('mouse_move', x=rel_x, y=rel_y)
-                self.logger.debug(f"Mouse position recorded: ({rel_x}, {rel_y}) - Screen: ({x}, {y}), Window: ({win_x}, {win_y})")
+                # Check if mouse is within window boundaries
+                if 0 <= rel_x <= win_width and 0 <= rel_y <= win_height:
+                    # Record the position with detailed logging
+                    self.bot.record_action('mouse_move', x=rel_x, y=rel_y)
+                    self.logger.debug(f"Mouse position recorded: ({rel_x}, {rel_y}) - Screen: ({x}, {y}), Window: ({win_x}, {win_y})")
+                else:
+                    self.logger.debug(f"Mouse outside window bounds: ({rel_x}, {rel_y})")
 
-                # Schedule next check with slightly longer interval
-                self.master.after(100, self._check_mouse_position)  # Changed from 50ms to 100ms
+                # Schedule next check with longer interval to prevent overwhelming
+                if self.capture_mouse:  # Check if still capturing before scheduling
+                    self.master.after(150, self._check_mouse_position)  # Increased from 100ms to 150ms
             except Exception as e:
                 self.logger.error(f"Error capturing mouse position: {str(e)}")
                 self.logger.error(f"Stack trace: {traceback.format_exc()}")
@@ -648,7 +679,7 @@ class MainWindow:
                 self.logger.error(f"Error recording mouse event: {str(e)}")
 
     def _open_settings(self):
-        # To be implemented
+        #        # To be implemented
         self.logger.info("Opening settings...")
         pass
 
@@ -664,8 +695,7 @@ class MainWindow:
 
     def _add_obstacle(self):
         # To be implemented
-        self.logger.info("Adding obstacle...")
-        pass
+        self.logger.info("Adding obstacle...")        pass
 
     def _clear_obstacles(self):
         # To be implemented
