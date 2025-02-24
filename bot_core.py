@@ -91,7 +91,9 @@ class FishingBot:
                 self.logger.warning(f"Could not initialize audio: {e}")
                 self.audio = None
 
+        # Load saved configurations
         self._load_macros() #load macros on init
+        self._load_sound_triggers() #load sound triggers on init
 
 
     def _init_dependencies(self):
@@ -816,6 +818,17 @@ class FishingBot:
                 if not self.is_window_active():
                     self.activate_window()
                     time.sleep(0.1)
+
+                # Convert button name to pyautogui format
+                button_map = {
+                    'left': 'left',
+                    'right': 'right', 
+                    'middle': 'middle',
+                    'left_click': 'left',
+                    'right_click': 'right',
+                    'middle_click': 'middle'
+                }
+                button = button_map.get(button.lower(), button)
 
                 # Add slight random delay for more natural clicking
                 time.sleep(random.uniform(0, 0.1))

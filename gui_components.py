@@ -120,10 +120,17 @@ class MainWindow:
             macro_frame = ttk.LabelFrame(main_frame, text="Macro Management", padding="5")
             macro_frame.pack(fill="x", padx=5, pady=2)
 
+            # Macro Selection Frame
+            macro_select_frame = ttk.Frame(macro_frame)
+            macro_select_frame.pack(fill="x", padx=5, pady=2)
+            ttk.Label(macro_select_frame, text="Select Macro:").pack(side="left", padx=5)
+            self.macro_select = ttk.Combobox(macro_select_frame, state="readonly")
+            self.macro_select.pack(side="left", fill="x", expand=True, padx=5)
+
             # Macro Name Entry
             macro_name_frame = ttk.Frame(macro_frame)
             macro_name_frame.pack(fill="x", padx=5, pady=2)
-            ttk.Label(macro_name_frame, text="Macro Name:").pack(side="left", padx=5)
+            ttk.Label(macro_name_frame, text="New Macro Name:").pack(side="left", padx=5)
             self.macro_name_entry = ttk.Entry(macro_name_frame)
             self.macro_name_entry.pack(side="left", fill="x", expand=True, padx=5)
 
@@ -133,28 +140,35 @@ class MainWindow:
 
             # Record/Stop Macro Button
             self.record_macro_btn = ttk.Button(macro_controls, text="Record Macro", 
-                                       command=self._toggle_macro_recording)
+                                               command=self._toggle_macro_recording)
             self.record_macro_btn.pack(side="left", fill="x", expand=True, padx=2)
 
             # Play Macro Button
             self.play_macro_btn = ttk.Button(macro_controls, text="Play Macro",
-                                    command=self._play_macro)
+                                               command=self._play_macro)
             self.play_macro_btn.pack(side="right", fill="x", expand=True, padx=2)
 
             # Sound Trigger Frame
             sound_frame = ttk.LabelFrame(main_frame, text="Sound Triggers", padding="5")
             sound_frame.pack(fill="x", padx=5, pady=2)
 
+            # Sound Selection Frame
+            sound_select_frame = ttk.Frame(sound_frame)
+            sound_select_frame.pack(fill="x", padx=5, pady=2)
+            ttk.Label(sound_select_frame, text="Select Sound:").pack(side="left", padx=5)
+            self.sound_select = ttk.Combobox(sound_select_frame, state="readonly")
+            self.sound_select.pack(side="left", fill="x", expand=True, padx=5)
+
             # Trigger Name Entry
             trigger_name_frame = ttk.Frame(sound_frame)
             trigger_name_frame.pack(fill="x", padx=5, pady=2)
-            ttk.Label(trigger_name_frame, text="Trigger Name:").pack(side="left", padx=5)
+            ttk.Label(trigger_name_frame, text="New Trigger Name:").pack(side="left", padx=5)
             self.trigger_name_entry = ttk.Entry(trigger_name_frame)
             self.trigger_name_entry.pack(side="left", fill="x", expand=True, padx=5)
 
             # Record Sound Button
             self.record_sound_btn = ttk.Button(sound_frame, text="Record Sound",
-                                      command=self._record_sound)
+                                               command=self._record_sound)
             self.record_sound_btn.pack(fill="x", padx=5, pady=2)
 
             # Action Binding Frame
@@ -162,11 +176,12 @@ class MainWindow:
             action_frame.pack(fill="x", padx=5, pady=2)
             ttk.Label(action_frame, text="Bind Action:").pack(side="left", padx=5)
 
-            # Action Type Combobox
+            # Action Type Combobox with expanded options
             self.action_type = ttk.Combobox(action_frame, 
-                                          values=["Key Press", "Mouse Click", "Macro"])
+                                          values=["Key Press", "Left Click", "Right Click", "Middle Click", "Macro"])
             self.action_type.pack(side="left", padx=5)
             self.action_type.set("Key Press")
+            self.action_type.bind('<<ComboboxSelected>>', self._on_action_type_change)
 
             # Key/Button Entry
             self.action_key_entry = ttk.Entry(action_frame, width=10)
@@ -174,8 +189,18 @@ class MainWindow:
 
             # Save Trigger Button
             self.save_trigger_btn = ttk.Button(sound_frame, text="Save Trigger",
-                                      command=self._save_sound_trigger)
+                                               command=self._save_sound_trigger)
             self.save_trigger_btn.pack(fill="x", padx=5, pady=2)
+
+            # Bind mouse and keyboard events for macro recording
+            self.master.bind('<Key>', self._on_key_event)
+            self.master.bind('<Button-1>', lambda e: self._on_mouse_event('left_click', e))
+            self.master.bind('<Button-3>', lambda e: self._on_mouse_event('right_click', e))
+            self.master.bind('<Motion>', self._on_mouse_move)
+
+            # Update macro and sound lists
+            self._update_macro_list()
+            self._update_sound_list()
 
 
             # Bot Control Frame
@@ -483,24 +508,30 @@ class MainWindow:
                 return
 
             action_type = self.action_type.get()
-            action_key = self.action_key_entry.get().strip()
-            if not action_key:
-                messagebox.showerror("Error", "Please enter a key or button")
-                return
 
-            # Create action function based on type
+            # Handle different action types
             if action_type == "Key Press":
+                action_key = self.action_key_entry.get().strip()
+                if not action_key:
+                    messagebox.showerror("Error", "Please enter a key")
+                    return
                 action = lambda: self.bot.press_key(action_key)
-            elif action_type == "Mouse Click":
-                action = lambda: self.bot.click(button=action_key)
+            elif action_type in ["Left Click", "Right Click", "Middle Click"]:
+                button = action_type.lower().replace(" click", "")
+                action = lambda: self.bot.click(button=button)
             else:  # Macro
-                action = lambda: self.bot.play_macro(action_key)
+                macro_name = self.action_key_entry.get().strip()
+                if not macro_name:
+                    messagebox.showerror("Error", "Please enter a macro name")
+                    return
+                action = lambda: self.bot.play_macro(macro_name)
 
             # Save trigger
             if self.bot.add_sound_trigger(trigger_name, action):
                 self.status_label.config(text="Trigger Saved")
                 self.trigger_name_entry.delete(0, tk.END)
                 self.action_key_entry.delete(0, tk.END)
+                self._update_sound_list()
             else:
                 messagebox.showerror("Error", "Failed to save trigger")
 
@@ -527,6 +558,7 @@ class MainWindow:
                     self.play_macro_btn.config(state="normal")
                     self.status_label.config(text="Macro Recorded")
                     self.macro_name_entry.delete(0, tk.END)
+                    self._update_macro_list()
 
         except Exception as e:
             self.logger.error(f"Error toggling macro recording: {str(e)}")
@@ -535,9 +567,9 @@ class MainWindow:
     def _play_macro(self):
         """Play selected macro"""
         try:
-            macro_name = self.macro_name_entry.get().strip()
+            macro_name = self.macro_select.get()
             if not macro_name:
-                messagebox.showerror("Error", "Please enter a macro name")
+                messagebox.showerror("Error", "Please select a macro")
                 return
 
             if macro_name not in self.bot.macros:
@@ -556,6 +588,51 @@ class MainWindow:
         except Exception as e:
             self.logger.error(f"Error playing macro: {str(e)}")
             messagebox.showerror("Error", f"Failed to play macro: {str(e)}")
+
+    def _on_action_type_change(self, event):
+        """Handle action type selection change"""
+        action_type = self.action_type.get()
+        if action_type in ["Left Click", "Right Click", "Middle Click"]:
+            self.action_key_entry.config(state="disabled")
+        else:
+            self.action_key_entry.config(state="normal")
+
+    def _update_macro_list(self):
+        """Update the macro selection dropdown"""
+        if hasattr(self.bot, 'macros'):
+            macro_names = list(self.bot.macros.keys())
+            self.macro_select['values'] = macro_names
+            if macro_names:
+                self.macro_select.set(macro_names[0])
+
+    def _update_sound_list(self):
+        """Update the sound selection dropdown"""
+        if hasattr(self.bot, 'sound_triggers'):
+            sound_names = list(self.bot.sound_triggers.keys())
+            self.sound_select['values'] = sound_names
+            if sound_names:
+                self.sound_select.set(sound_names[0])
+
+    def _on_key_event(self, event):
+        """Handle keyboard events during macro recording"""
+        if self.bot.recording_macro:
+            key = event.keysym
+            self.bot.record_action('key', key=key)
+            self.logger.debug(f"Recorded key press: {key}")
+
+    def _on_mouse_event(self, button_type, event):
+        """Handle mouse click events during macro recording"""
+        if self.bot.recording_macro:
+            x, y = event.x, event.y
+            self.bot.record_action('click', x=x, y=y, button=button_type)
+            self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
+
+    def _on_mouse_move(self, event):
+        """Handle mouse movement events during macro recording"""
+        if self.bot.recording_macro:
+            x, y = event.x, event.y
+            self.bot.record_action('mouse_move', x=x, y=y)
+            self.logger.debug(f"Recorded mouse move to ({x}, {y})")
 
     def _open_settings(self):
         # To be implemented
