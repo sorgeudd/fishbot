@@ -12,6 +12,10 @@ import wave
 import numpy as np
 import traceback
 from collections import deque
+from ctypes import Structure, pointer, c_long, windll
+
+class POINT(Structure):
+    _fields_ = [("x", c_long), ("y", c_long)]
 
 try:
     from vision_system import VisionSystem
@@ -100,6 +104,7 @@ class FishingBot:
     def _init_dependencies(self):
         """Initialize dependencies based on platform"""
         if self.test_mode:
+            self.direct_input = DirectInput(test_mode=True)
             return
 
         try:
@@ -112,8 +117,8 @@ class FishingBot:
             self.np = np
             self.ImageGrab = ImageGrab
             
-            # Initialize DirectInput instead of PyAutoGUI
-            self.direct_input = DirectInput()
+            # Initialize DirectInput 
+            self.direct_input = DirectInput(test_mode=False)
             self.logger.info("DirectInput initialized for mouse control")
 
             # Only import Windows-specific modules when on Windows
@@ -123,8 +128,13 @@ class FishingBot:
 
                 self.win32gui = win32gui
                 self.win32process = win32process
+                self.user32 = windll.user32
+                self.logger.debug("Initialized Win32 API modules")
             else:
                 self.logger.warning("Running on non-Windows platform. Some features will be limited.")
+                self.win32gui = None
+                self.win32process = None
+                self.user32 = None
 
             self.logger.info("Successfully initialized dependencies")
         except ImportError as e:
@@ -325,6 +335,53 @@ class FishingBot:
 
         except Exception as e:
             self.logger.error(f"Error adding sound trigger: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+    def start_sound_monitoring(self):
+        """Start monitoring for sound triggers"""
+        try:
+            if not self.audio:
+                self.logger.error("Audio system not initialized")
+                return False
+
+            if self.audio_stream:
+                self.logger.warning("Sound monitoring already active")
+                return True
+
+            # Initialize audio stream
+            self.audio_stream = self.audio.open(
+                format=self.audio_format,
+                channels=self.audio_channels,
+                rate=self.audio_sample_rate,
+                input=True,
+                frames_per_buffer=self.audio_chunk_size
+            )
+            
+            self.logger.info("Started sound monitoring")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error starting sound monitoring: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+    def stop_sound_monitoring(self):
+        """Stop monitoring for sound triggers"""
+        try:
+            if not self.audio_stream:
+                self.logger.warning("Sound monitoring not active")
+                return True
+
+            self.audio_stream.stop_stream()
+            self.audio_stream.close()
+            self.audio_stream = None
+            
+            self.logger.info("Stopped sound monitoring")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error stopping sound monitoring: {str(e)}")
             self.logger.error(f"Stack trace: {traceback.format_exc()}")
             return False
 
@@ -814,7 +871,20 @@ class FishingBot:
                 self.logger.error("Window not detected. Cannot move mouse.")
                 return False
 
-            self.logger.debug(f"Moving mouse to screen coordinates: ({x}, {y})")
+            # Get current window position and dimensions
+            win_x, win_y, win_right, win_bottom = self.window_rect
+            win_width = win_right - win_x
+            win_height = win_bottom - win_y
+
+            # Convert target coordinates to absolute screen coordinates
+            screen_x = x + win_x
+            screen_y = y + win_y
+
+            # Log detailed coordinate information
+            self.logger.debug("Mouse movement coordinate translation:")
+            self.logger.debug(f"Window bounds: {self.window_rect}")
+            self.logger.debug(f"Window-relative coordinates: ({x}, {y})")
+            self.logger.debug(f"Computed screen coordinates: ({screen_x}, {screen_y})")
 
             # Ensure window is active
             if not self.is_window_active():
@@ -822,7 +892,16 @@ class FishingBot:
                 time.sleep(0.1)
 
             # Use DirectInput for precise movement
-            return self.direct_input.move_mouse(x, y, smooth=True)
+            success = self.direct_input.move_mouse(screen_x, screen_y, smooth=True)
+            
+            if success:
+                # Record final position for verification
+                final = POINT()
+                self.user32.GetCursorPos(pointer(final))
+                self.logger.debug(f"Final screen position: ({final.x}, {final.y})")
+                self.logger.debug(f"Relative to window: ({final.x - win_x}, {final.y - win_y})")
+            
+            return success
 
         except Exception as e:
             self.logger.error(f"Mouse movement error: {str(e)}")

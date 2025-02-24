@@ -193,6 +193,21 @@ class MainWindow:
                                                command=self._save_sound_trigger)
             self.save_trigger_btn.pack(fill="x", padx=5, pady=2)
 
+            # Add trigger control buttons
+            trigger_controls = ttk.Frame(sound_frame)
+            trigger_controls.pack(fill="x", padx=5, pady=2)
+
+            # Start Sound Trigger Button
+            self.start_trigger_btn = ttk.Button(trigger_controls, text="Start Sound Triggers",
+                                              command=self._start_sound_triggers)
+            self.start_trigger_btn.pack(side="left", fill="x", expand=True, padx=2)
+
+            # Stop Sound Trigger Button
+            self.stop_trigger_btn = ttk.Button(trigger_controls, text="Stop Sound Triggers",
+                                             command=self._stop_sound_triggers,
+                                             state="disabled")
+            self.stop_trigger_btn.pack(side="right", fill="x", expand=True, padx=2)
+
             # Bind mouse and keyboard events for macro recording
             self.master.bind('<Key>', self._on_key_event)
             self.master.bind('<Button-1>', lambda e: self._on_mouse_event('left_click', e))
@@ -288,7 +303,6 @@ class MainWindow:
         except Exception as e:
             print(f"Error setting up GUI logging: {str(e)}")
             # Keep the console handler if GUI logging fails
-
 
 
     def _toggle_learning(self):
@@ -536,18 +550,18 @@ class MainWindow:
             action_type = self.action_type.get()
             self.logger.debug(f"Creating sound trigger '{trigger_name}' with action type: {action_type}")
 
-            # Create the specific action function based on type
+            # Create specific action based on type
             if action_type == "Key Press":
                 action_key = self.action_key_entry.get().strip()
                 if not action_key:
                     messagebox.showerror("Error", "Please enter a key")
                     return
-                action = lambda: self.bot.press_key(action_key)
+                def action(): return self.bot.press_key(action_key)
                 self.logger.info(f"Creating key press trigger for key: {action_key}")
 
             elif action_type in ["Left Click", "Right Click", "Middle Click"]:
                 button = action_type.lower().replace(" click", "")
-                action = lambda: self.bot.direct_input.click(button=button)
+                def action(): return self.bot.click(button=button)
                 self.logger.info(f"Creating mouse click trigger for button: {button}")
 
             elif action_type == "Macro":
@@ -555,14 +569,14 @@ class MainWindow:
                 if not macro_name:
                     messagebox.showerror("Error", "Please enter a macro name")
                     return
-                action = lambda: self.bot.play_macro(macro_name)
+                def action(): return self.bot.play_macro(macro_name)
                 self.logger.info(f"Creating macro trigger for macro: {macro_name}")
             else:
                 messagebox.showerror("Error", "Please select an action type")
                 return
 
-            # Save trigger with action
-            success = self.bot.add_sound_trigger(trigger_name, lambda: action())
+            # Save trigger with proper action function
+            success = self.bot.add_sound_trigger(trigger_name, action)
 
             if success:
                 self.status_label.config(text="Trigger Saved")
@@ -863,3 +877,45 @@ class MainWindow:
             except Exception as e:
                 self.logger.error(f"Error recording mouse event: {str(e)}")
                 self.logger.error(f"Stack trace: {traceback.format_exc()}")
+
+    def _start_sound_triggers(self):
+        """Start sound trigger monitoring"""
+        try:
+            if self.test_mode:
+                self.logger.info("Test mode: Starting sound triggers")
+                success = True
+            else:
+                success = self.bot.start_sound_monitoring()
+
+            if success:
+                self.status_label.config(text="Sound Triggers Active")
+                self.start_trigger_btn.config(state="disabled")
+                self.stop_trigger_btn.config(state="normal")
+                self.logger.info("Sound trigger monitoring started")
+            else:
+                messagebox.showerror("Error", "Failed to start sound triggers")
+        except Exception as e:
+            self.logger.error(f"Error starting sound triggers: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            messagebox.showerror("Error", f"Failed to start sound triggers: {str(e)}")
+
+    def _stop_sound_triggers(self):
+        """Stop sound trigger monitoring"""
+        try:
+            if self.test_mode:
+                self.logger.info("Test mode: Stopping sound triggers")
+                success = True
+            else:
+                success = self.bot.stop_sound_monitoring()
+
+            if success:
+                self.status_label.config(text="Sound Triggers Stopped")
+                self.start_trigger_btn.config(state="normal")
+                self.stop_trigger_btn.config(state="disabled")
+                self.logger.info("Sound trigger monitoring stopped")
+            else:
+                messagebox.showerror("Error", "Failed to stop sound triggers")
+        except Exception as e:
+            self.logger.error(f"Error stopping sound triggers: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            messagebox.showerror("Error", f"Failed to stop sound triggers: {str(e)}")
