@@ -885,8 +885,13 @@ class FishingBot:
         Args:
             action_type: Type of action ('move', 'click', 'key', etc.)
             **kwargs: Additional action parameters (x, y for mouse, key for keyboard, etc.)
+
+        This method records actions for both learning mode and macro recording.
         """
         try:
+            timestamp = time.time()
+            self.logger.debug(f"Recording action: {action_type} at {timestamp} with params {kwargs}")
+
             if self.learning_mode and self.gameplay_learner:
                 # Record for learning mode
                 position = (kwargs.get('x'), kwargs.get('y')) if 'x' in kwargs and 'y' in kwargs else None
@@ -894,17 +899,39 @@ class FishingBot:
                 self.logger.debug(f"Recorded learning action: {action_type} at {position}")
 
             if self.recording_macro:
-                # Record for macro
+                # Record for macro with detailed coordinates
                 action = {
                     'type': action_type,
-                    'timestamp': time.time(),
-                    **kwargs
+                    'timestamp': timestamp
                 }
+
+                # Handle different action types
+                if action_type == 'mouse_move':
+                    action.update({
+                        'x': kwargs.get('x'),
+                        'y': kwargs.get('y')
+                    })
+                    self.logger.debug(f"Recording mouse movement to ({kwargs.get('x')}, {kwargs.get('y')})")
+                elif action_type == 'click':
+                    action.update({
+                        'x': kwargs.get('x'),
+                        'y': kwargs.get('y'),
+                        'button': kwargs.get('button', 'left')
+                    })
+                    self.logger.debug(f"Recording mouse click at ({kwargs.get('x')}, {kwargs.get('y')}) with button {kwargs.get('button')}")
+                elif action_type == 'key':
+                    action.update({
+                        'key': kwargs.get('key'),
+                        'duration': kwargs.get('duration', 0.1)
+                    })
+                    self.logger.debug(f"Recording key press: {kwargs.get('key')}")
+
                 self.macro_actions.append(action)
-                self.logger.debug(f"Recorded macro action: {action_type} with params {kwargs}")
+                self.logger.debug(f"Added action to macro '{self.current_macro}', total actions: {len(self.macro_actions)}")
 
         except Exception as e:
             self.logger.error(f"Error recording action: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
 
 
 

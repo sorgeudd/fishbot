@@ -197,7 +197,7 @@ class MainWindow:
             self.master.bind('<Key>', self._on_key_event)
             self.master.bind('<Button-1>', lambda e: self._on_mouse_event('left_click', e))
             self.master.bind('<Button-3>', lambda e: self._on_mouse_event('right_click', e))
-            #self.master.bind('<Motion>', self._on_mouse_move) #Commented out to avoid conflicts
+            
 
             # Update macro and sound lists
             self._update_macro_list()
@@ -288,6 +288,7 @@ class MainWindow:
         except Exception as e:
             print(f"Error setting up GUI logging: {str(e)}")
             # Keep the console handler if GUI logging fails
+
 
 
     def _toggle_learning(self):
@@ -566,7 +567,7 @@ class MainWindow:
                     # Start capturing mouse movements
                     self.capture_mouse = True
                     self.logger.debug("Starting mouse position capture")
-                    self._check_mouse_position()
+                    self._start_mouse_capture()
             else:
                 self.logger.debug("Stopping macro recording...")
                 if self.bot.stop_macro_recording():
@@ -588,6 +589,11 @@ class MainWindow:
             self.logger.error(f"Stack trace: {traceback.format_exc()}")
             messagebox.showerror("Error", f"Failed to toggle macro recording: {str(e)}")
 
+    def _start_mouse_capture(self):
+        """Start the mouse position capture loop"""
+        self.logger.debug("Mouse capture loop starting")
+        self._check_mouse_position()
+
     def _check_mouse_position(self):
         """Continuously check mouse position during macro recording"""
         if self.capture_mouse and self.bot.recording_macro:
@@ -596,19 +602,37 @@ class MainWindow:
                 x = self.master.winfo_pointerx()
                 y = self.master.winfo_pointery()
 
+                # Get window position
+                win_x = self.master.winfo_rootx()
+                win_y = self.master.winfo_rooty()
+
                 # Convert to window coordinates
-                x = x - self.master.winfo_rootx()
-                y = y - self.master.winfo_rooty()
+                rel_x = x - win_x
+                rel_y = y - win_y
 
                 # Record the position with detailed logging
-                self.bot.record_action('mouse_move', x=x, y=y)
-                self.logger.debug(f"Mouse position recorded: ({x}, {y})")
+                self.bot.record_action('mouse_move', x=rel_x, y=rel_y)
+                self.logger.debug(f"Mouse position recorded: ({rel_x}, {rel_y}) - Screen: ({x}, {y}), Window: ({win_x}, {win_y})")
 
-                # Schedule next check
-                self.master.after(50, self._check_mouse_position)
+                # Schedule next check with slightly longer interval
+                self.master.after(100, self._check_mouse_position)  # Changed from 50ms to 100ms
             except Exception as e:
                 self.logger.error(f"Error capturing mouse position: {str(e)}")
                 self.logger.error(f"Stack trace: {traceback.format_exc()}")
+
+    def _update_macro_list(self):
+        """Update the macro selection dropdown"""
+        try:
+            if hasattr(self.bot, 'macros'):
+                macro_names = list(self.bot.macros.keys())
+                self.macro_select['values'] = macro_names
+                if macro_names:
+                    self.macro_select.set(macro_names[0])
+                    self.logger.info(f"Updated macro list with {len(macro_names)} macros: {macro_names}")
+                else:
+                    self.logger.info("No macros available")
+        except Exception as e:
+            self.logger.error(f"Error updating macro list: {str(e)}")
 
     def _on_mouse_event(self, button_type, event):
         """Handle mouse click events during macro recording"""
@@ -622,13 +646,6 @@ class MainWindow:
                 self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
             except Exception as e:
                 self.logger.error(f"Error recording mouse event: {str(e)}")
-
-    def _on_mouse_move(self, event):
-        """Handle mouse movement events during macro recording"""
-        if self.bot.recording_macro:
-            x, y = event.x, event.y
-            self.bot.record_action('mouse_move', x=x, y=y)
-            self.logger.debug(f"Recorded mouse move to ({x}, {y})")
 
     def _open_settings(self):
         # To be implemented
@@ -696,9 +713,9 @@ class MainWindow:
                 self.macro_select['values'] = macro_names
                 if macro_names:
                     self.macro_select.set(macro_names[0])
-                    self.logger.debug(f"Updated macro list with {len(macro_names)} macros")
+                    self.logger.info(f"Updated macro list with {len(macro_names)} macros: {macro_names}")
                 else:
-                    self.logger.debug("No macros available")
+                    self.logger.info("No macros available")
         except Exception as e:
             self.logger.error(f"Error updating macro list: {str(e)}")
 
