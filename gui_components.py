@@ -12,6 +12,7 @@ class MainWindow:
     def __init__(self, master, test_mode=False):
         self.master = master
         self.test_mode = test_mode
+        self.capture_mouse = False # Added instance variable
 
         # Setup logging first
         self.logger = logging.getLogger('GUI')
@@ -196,7 +197,7 @@ class MainWindow:
             self.master.bind('<Key>', self._on_key_event)
             self.master.bind('<Button-1>', lambda e: self._on_mouse_event('left_click', e))
             self.master.bind('<Button-3>', lambda e: self._on_mouse_event('right_click', e))
-            self.master.bind('<Motion>', self._on_mouse_move)
+            #self.master.bind('<Motion>', self._on_mouse_move) #Commented out to avoid conflicts
 
             # Update macro and sound lists
             self._update_macro_list()
@@ -552,6 +553,10 @@ class MainWindow:
                     self.record_macro_btn.config(text="Stop Recording")
                     self.play_macro_btn.config(state="disabled")
                     self.status_label.config(text=f"Recording Macro: {macro_name}")
+
+                    # Start capturing mouse movements globally
+                    self.capture_mouse = True
+                    self.after(50, self._check_mouse_position)  # Check every 50ms
             else:
                 if self.bot.stop_macro_recording():
                     self.record_macro_btn.config(text="Record Macro")
@@ -560,9 +565,73 @@ class MainWindow:
                     self.macro_name_entry.delete(0, tk.END)
                     self._update_macro_list()
 
+                    # Stop mouse movement capture
+                    self.capture_mouse = False
+
         except Exception as e:
             self.logger.error(f"Error toggling macro recording: {str(e)}")
             messagebox.showerror("Error", f"Failed to toggle macro recording: {str(e)}")
+
+    def _check_mouse_position(self):
+        """Continuously check mouse position during macro recording"""
+        if self.capture_mouse and self.bot.recording_macro:
+            try:
+                # Get current mouse position relative to screen
+                x = self.master.winfo_pointerx() - self.master.winfo_rootx()
+                y = self.master.winfo_pointery() - self.master.winfo_rooty()
+
+                # Record the position
+                self.bot.record_action('mouse_move', x=x, y=y)
+
+                # Schedule next check
+                self.after(50, self._check_mouse_position)
+            except Exception as e:
+                self.logger.error(f"Error capturing mouse position: {str(e)}")
+
+    def _on_mouse_event(self, button_type, event):
+        """Handle mouse click events during macro recording"""
+        if self.bot.recording_macro:
+            try:
+                # Get click position relative to window
+                x = event.x_root - self.master.winfo_rootx()
+                y = event.y_root - self.master.winfo_rooty()
+
+                self.bot.record_action('click', x=x, y=y, button=button_type)
+                self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
+            except Exception as e:
+                self.logger.error(f"Error recording mouse event: {str(e)}")
+
+    def _on_mouse_move(self, event):
+        """Handle mouse movement events during macro recording"""
+        if self.bot.recording_macro:
+            x, y = event.x, event.y
+            self.bot.record_action('mouse_move', x=x, y=y)
+            self.logger.debug(f"Recorded mouse move to ({x}, {y})")
+
+    def _open_settings(self):
+        # To be implemented
+        self.logger.info("Opening settings...")
+        pass
+
+    def _set_region(self):
+        # To be implemented
+        self.logger.info("Setting minigame region...")
+        pass
+
+    def _select_game_window(self):
+        # To be implemented
+        self.logger.info("Selecting game window...")
+        pass
+
+    def _add_obstacle(self):
+        # To be implemented
+        self.logger.info("Adding obstacle...")
+        pass
+
+    def _clear_obstacles(self):
+        # To be implemented
+        self.logger.info("Clearing obstacles...")
+        pass
 
     def _play_macro(self):
         """Play selected macro"""
@@ -623,38 +692,12 @@ class MainWindow:
     def _on_mouse_event(self, button_type, event):
         """Handle mouse click events during macro recording"""
         if self.bot.recording_macro:
-            x, y = event.x, event.y
-            self.bot.record_action('click', x=x, y=y, button=button_type)
-            self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
+            try:
+                # Get click position relative to window
+                x = event.x_root - self.master.winfo_rootx()
+                y = event.y_root - self.master.winfo_rooty()
 
-    def _on_mouse_move(self, event):
-        """Handle mouse movement events during macro recording"""
-        if self.bot.recording_macro:
-            x, y = event.x, event.y
-            self.bot.record_action('mouse_move', x=x, y=y)
-            self.logger.debug(f"Recorded mouse move to ({x}, {y})")
-
-    def _open_settings(self):
-        # To be implemented
-        self.logger.info("Opening settings...")
-        pass
-
-    def _set_region(self):
-        # To be implemented
-        self.logger.info("Setting minigame region...")
-        pass
-
-    def _select_game_window(self):
-        # To be implemented
-        self.logger.info("Selecting game window...")
-        pass
-
-    def _add_obstacle(self):
-        # To be implemented
-        self.logger.info("Adding obstacle...")
-        pass
-
-    def _clear_obstacles(self):
-        # To be implemented
-        self.logger.info("Clearing obstacles...")
-        pass
+                self.bot.record_action('click', x=x, y=y, button=button_type)
+                self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
+            except Exception as e:
+                self.logger.error(f"Error recording mouse event: {str(e)}")
