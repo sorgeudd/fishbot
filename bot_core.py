@@ -106,24 +106,23 @@ class FishingBot:
             import cv2
             import numpy as np
             from PIL import ImageGrab
+            from direct_input import DirectInput
 
             self.cv2 = cv2
             self.np = np
             self.ImageGrab = ImageGrab
+            
+            # Initialize DirectInput instead of PyAutoGUI
+            self.direct_input = DirectInput()
+            self.logger.info("DirectInput initialized for mouse control")
 
             # Only import Windows-specific modules when on Windows
             if platform.system() == 'Windows':
                 import win32gui
                 import win32process
-                import pyautogui
 
                 self.win32gui = win32gui
                 self.win32process = win32process
-                self.pyautogui = pyautogui
-
-                # Configure PyAutoGUI safety settings
-                self.pyautogui.FAILSAFE = True
-                self.pyautogui.PAUSE = 0.1
             else:
                 self.logger.warning("Running on non-Windows platform. Some features will be limited.")
 
@@ -289,7 +288,7 @@ class FishingBot:
             self.logger.error(f"Error loading sound triggers: {e}")
             self.sound_triggers = {}
 
-    def add_sound_trigger(self, trigger_name, action=None):
+    def add_sound_trigger(self, trigger_name, action):
         """Add or update a sound trigger with associated action
         Args:
             trigger_name: Name of the trigger
@@ -302,15 +301,16 @@ class FishingBot:
                 self.logger.error("No trigger name provided")
                 return False
 
-            if not action:
-                self.logger.error("No action provided for trigger")
+            if not callable(action):
+                self.logger.error("Invalid action provided - must be callable")
                 return False
 
             # Create new trigger if it doesn't exist
             if trigger_name not in self.sound_triggers:
                 self.sound_triggers[trigger_name] = {
                     'pattern': None,
-                    'threshold': self.audio_threshold
+                    'threshold': self.audio_threshold,
+                    'action': None
                 }
                 self.logger.debug(f"Created new sound trigger: {trigger_name}")
 
@@ -804,11 +804,8 @@ class FishingBot:
             return [], []
 
     def move_mouse_to(self, x, y, duration=None):
-        """Move mouse with enhanced control and coordinate validation"""
+        """Move mouse using DirectInput with enhanced coordinate validation"""
         try:
-            if duration is None:
-                duration = self.config['mouse_movement_speed']
-
             if self.test_mode:
                 self.record_action('mouse_move', x=x, y=y)
                 return self.test_env.move_mouse(x, y)
@@ -817,43 +814,15 @@ class FishingBot:
                 self.logger.error("Window not detected. Cannot move mouse.")
                 return False
 
-            # Log the target coordinates
             self.logger.debug(f"Moving mouse to screen coordinates: ({x}, {y})")
 
-            if self.pyautogui:
-                # Add slight randomization to prevent detection
-                target_x = x + random.uniform(-2, 2)
-                target_y = y + random.uniform(-2, 2)
+            # Ensure window is active
+            if not self.is_window_active():
+                self.activate_window()
+                time.sleep(0.1)
 
-                # Ensure window is active
-                if not self.is_window_active():
-                    self.activate_window()
-                    time.sleep(0.1)
-
-                # Get current position
-                current_x, current_y = self.pyautogui.position()
-                self.logger.debug(f"Current mouse position: ({current_x}, {current_y})")
-
-                # Generate smooth path
-                points = self._generate_bezier_curve(
-                    current_x, current_y,
-                    target_x, target_y,
-                    num_points=20
-                )
-
-                # Move through points
-                for point_x, point_y in points:
-                    if self.stop_event.is_set():
-                        return False
-                    self.pyautogui.moveTo(point_x, point_y, duration/len(points))
-                    self.logger.debug(f"Moved to intermediate point: ({point_x}, {point_y})")
-
-                # Verify final position
-                final_x, final_y = self.pyautogui.position()
-                self.logger.debug(f"Final mouse position: ({final_x}, {final_y})")
-
-                return True
-            return False
+            # Use DirectInput for precise movement
+            return self.direct_input.move_mouse(x, y, smooth=True)
 
         except Exception as e:
             self.logger.error(f"Mouse movement error: {str(e)}")
@@ -1097,94 +1066,78 @@ class FishingBot:
     # Removed old _generate_bezier_curve implementation in favor of enhanced version above
 
     def click(self, x=None, y=None, button='left', clicks=1, interval=None):
-        """Perform mouse click with optional position and window coordinate translation"""
+        """Perform mouse click using DirectInput"""
         try:
-            if interval is None:
-                interval = self.config['click_delay']
+            if self.test_mode:
+                return True
 
+            # Move to position first if coordinates provided
             if x is not None and y is not None:
                 if not self.move_mouse_to(x, y):
                     return False
+                time.sleep(0.1)  # Short delay before click
 
-            if not self.window_handle:
-                self.logger.error("Window not detected. Cannot click.")
-                return False
-
+            # Use DirectInput for precise clicking
             if clicks == 2:
-                interval = self.config['double_click_interval']
-
-            if self.test_mode:
-                self.record_action('click', x=x, y=y, button=button, clicks=clicks)
-                return self.test_env.click(button, clicks)
-
-            if self.pyautogui:
-                # Ensure window is active
-                if not self.is_window_active():
-                    self.activate_window()
-                    time.sleep(0.1)
-
-                # Convert button name to pyautogui format
-                button_map = {
-                    'left': 'left',
-                    'right': 'right', 
-                    'middle': 'middle',
-                    'left_click': 'left',
-                    'right_click': 'right',
-                    'middle_click': 'middle'
-                }
-                button = button_map.get(button.lower(), button)
-
-                # Add slight random delay for more natural clicking
-                time.sleep(random.uniform(0, 0.1))
-
-                self.pyautogui.click(clicks=clicks, interval=interval, button=button)
-                self.record_action('click', x=x, y=y, button=button, clicks=clicks)
-                self.logger.debug(f"Clicked at current position, button={button}, clicks={clicks}")
-                return True
-            return False
+                # For double click, use two separate clicks with configured interval
+                success = self.direct_input.click(button=button)
+                time.sleep(self.config['double_click_interval'])
+                success &= self.direct_input.click(button=button)
+                return success
+            else:
+                return self.direct_input.click(button=button)
 
         except Exception as e:
-            self.logger.error(f"Click error: {str(e)}")
+            self.logger.error(f"Error performing click: {str(e)}")
             return False
 
     def press_key(self, key, duration=None):
-        """Press key with test mode support"""
+        """Press key using DirectInput"""
         try:
             if self.test_mode:
                 self.record_action('key', key=key, duration=duration)
                 return self.test_env.press_key(key, duration)
 
-            if self.pyautogui:
-                if duration:
-                    self.pyautogui.keyDown(key)
-                    time.sleep(duration)
-                    self.pyautogui.keyUp(key)
-                else:
-                    self.pyautogui.press(key)
-                self.record_action('key', key=key, duration=duration)
-                self.logger.debug(f"Pressed key: {key}, duration: {duration}")
-                return True
-            return False
+            # Use DirectInput for key press
+            if duration:
+                success = self.direct_input.key_down(key)
+                time.sleep(duration)
+                success &= self.direct_input.key_up(key)
+                self.logger.debug(f"Held key {key} for {duration}s")
+                return success
+            else:
+                success = self.direct_input.tap_key(key)
+                self.logger.debug(f"Tapped key: {key}")
+                return success
 
         except Exception as e:
             self.logger.error(f"Key press error: {str(e)}")
             return False
 
     def drag_mouse(self, start_x, start_y, end_x, end_y, duration=None):
-        """Perform mouse drag operation"""
+        """Perform mouse drag operation using DirectInput"""
         try:
             if duration is None:
                 duration = self.config['mouse_movement_speed']
 
             # Move to start position
-            self.move_mouse_to(start_x, start_y)
+            if not self.move_mouse_to(start_x, start_y):
+                return False
 
-            # Perform drag
-            if self.pyautogui:
-                self.pyautogui.dragTo(end_x, end_y, duration=duration)
+            # Press mouse button
+            if not self.direct_input.mouse_down():
+                return False
+
+            # Move to end position with smoothing
+            success = self.direct_input.move_mouse(end_x, end_y, smooth=True)
+
+            # Release mouse button
+            success &= self.direct_input.mouse_up()
+
+            if success:
                 self.logger.debug(f"Dragged mouse from ({start_x}, {start_y}) to ({end_x}, {end_y})")
-                return True
-            return False
+            return success
+
         except Exception as e:
             self.logger.error(f"Mouse drag error: {str(e)}")
             return False

@@ -536,7 +536,7 @@ class MainWindow:
             action_type = self.action_type.get()
             self.logger.debug(f"Creating sound trigger '{trigger_name}' with action type: {action_type}")
 
-            # Create the action function based on type
+            # Create the specific action function based on type
             if action_type == "Key Press":
                 action_key = self.action_key_entry.get().strip()
                 if not action_key:
@@ -544,20 +544,25 @@ class MainWindow:
                     return
                 action = lambda: self.bot.press_key(action_key)
                 self.logger.info(f"Creating key press trigger for key: {action_key}")
+
             elif action_type in ["Left Click", "Right Click", "Middle Click"]:
                 button = action_type.lower().replace(" click", "")
-                action = lambda: self.bot.click(button=button)
+                action = lambda: self.bot.direct_input.click(button=button)
                 self.logger.info(f"Creating mouse click trigger for button: {button}")
-            else:  # Macro
+
+            elif action_type == "Macro":
                 macro_name = self.action_key_entry.get().strip()
                 if not macro_name:
                     messagebox.showerror("Error", "Please enter a macro name")
                     return
                 action = lambda: self.bot.play_macro(macro_name)
                 self.logger.info(f"Creating macro trigger for macro: {macro_name}")
+            else:
+                messagebox.showerror("Error", "Please select an action type")
+                return
 
             # Save trigger with action
-            success = self.bot.add_sound_trigger(trigger_name, action)
+            success = self.bot.add_sound_trigger(trigger_name, lambda: action())
 
             if success:
                 self.status_label.config(text="Trigger Saved")
