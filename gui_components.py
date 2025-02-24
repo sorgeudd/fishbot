@@ -290,6 +290,7 @@ class MainWindow:
             # Keep the console handler if GUI logging fails
 
 
+
     def _toggle_learning(self):
         """Toggle learning mode on/off"""
         try:
@@ -633,27 +634,48 @@ class MainWindow:
                 win_width = self.master.winfo_width()
                 win_height = self.master.winfo_height()
 
-                # Convert to window coordinates
+                # Convert to window coordinates (relative position)
                 rel_x = x - win_x
                 rel_y = y - win_y
 
-                # Check if mouse is within window boundaries and if position has changed
-                if (0 <= rel_x <= win_width and 0 <= rel_y <= win_height and
-                    not hasattr(self, '_last_pos') or 
-                    (self._last_pos != (rel_x, rel_y))):
+                # Validate coordinates are within window and have changed
+                if (0 <= rel_x <= win_width and 
+                    0 <= rel_y <= win_height and 
+                    (not hasattr(self, '_last_pos') or 
+                     self._last_pos != (rel_x, rel_y))):
 
-                    # Record the position with detailed logging
-                    self.bot.record_action('mouse_move', x=rel_x, y=rel_y)
-                    self.logger.debug(f"Mouse position recorded: ({rel_x}, {rel_y}) - Screen: ({x}, {y}), Window: ({win_x}, {win_y})")
+                    # Store normalized coordinates (0-1 range)
+                    norm_x = rel_x / win_width
+                    norm_y = rel_y / win_height
+
+                    # Record the normalized position
+                    self.bot.record_action('mouse_move', 
+                                         x=norm_x,
+                                         y=norm_y,
+                                         absolute_x=rel_x,
+                                         absolute_y=rel_y)
+
+                    self.logger.debug(
+                        f"Mouse position recorded: " +
+                        f"Screen({x}, {y}), " +
+                        f"Window({win_x}, {win_y}), " +
+                        f"Relative({rel_x}, {rel_y}), " +
+                        f"Normalized({norm_x:.3f}, {norm_y:.3f})"
+                    )
 
                     # Update last position
                     self._last_pos = (rel_x, rel_y)
                 else:
-                    self.logger.debug(f"Skipped recording - Mouse outside bounds or position unchanged: ({rel_x}, {rel_y})")
+                    self.logger.debug(
+                        f"Skipped recording - Out of bounds or unchanged: " +
+                        f"Screen({x}, {y}), " +
+                        f"Window({win_x}, {win_y}), " +
+                        f"Relative({rel_x}, {rel_y})"
+                    )
 
-                # Schedule next check with longer interval
+                # Schedule next check with increased interval
                 if self.capture_mouse:  # Check if still capturing before scheduling
-                    self.master.after(200, self._check_mouse_position)  # Increased interval
+                    self.master.after(250, self._check_mouse_position)  # Increased interval
             except Exception as e:
                 self.logger.error(f"Error capturing mouse position: {str(e)}")
                 self.logger.error(f"Stack trace: {traceback.format_exc()}")
@@ -670,21 +692,43 @@ class MainWindow:
                     self.logger.info(f"Updated macro list with {len(macro_names)} macros: {macro_names}")
                 else:
                     self.logger.info("No macros available")
-        except Exception as e:
-            self.logger.error(f"Error updating macro list: {str(e)}")
+        except Exception as e:            self.logger.error(f"Error updating macro list: {str(e)}")
 
     def _on_mouse_event(self, button_type, event):
         """Handle mouse click events during macro recording"""
         if self.bot.recording_macro:
             try:
-                # Get click position relative to window
-                x = event.x_root - self.master.winfo_rootx()
-                y = event.rooty()
+                # Get window position and size
+                win_x = self.master.winfo_rootx()
+                win_y = self.master.winfo_rooty()
+                win_width = self.master.winfo_width()
+                win_height = self.master.winfo_height()
 
-                self.bot.record_action('click', x=x, y=y, button=button_type)
-                self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
+                # Get click coordinates relative to window
+                rel_x = event.x_root - win_x
+                rel_y = event.y_root - win_y
+
+                # Normalize coordinates
+                norm_x = rel_x / win_width
+                norm_y = rel_y / win_height
+
+                self.bot.record_action('click', 
+                                     x=norm_x,
+                                     y=norm_y,
+                                     absolute_x=rel_x,
+                                     absolute_y=rel_y,
+                                     button=button_type)
+
+                self.logger.debug(
+                    f"Mouse {button_type} recorded: " +
+                    f"Screen({event.x_root}, {event.y_root}), " +
+                    f"Window({win_x}, {win_y}), " +
+                    f"Relative({rel_x}, {rel_y}), " +
+                    f"Normalized({norm_x:.3f}, {norm_y:.3f})"
+                )
             except Exception as e:
                 self.logger.error(f"Error recording mouse event: {str(e)}")
+                self.logger.error(f"Stack trace: {traceback.format_exc()}")
 
     def _open_settings(self):
         """Open the settings dialog"""
@@ -783,11 +827,34 @@ class MainWindow:
         """Handle mouse click events during macro recording"""
         if self.bot.recording_macro:
             try:
-                # Get click position relative to window
-                x = event.x_root - self.master.winfo_rootx()
-                y = event.y_root - self.master.winfo_rooty()
+                # Get window position and size
+                win_x = self.master.winfo_rootx()
+                win_y = self.master.winfo_rooty()
+                win_width = self.master.winfo_width()
+                win_height = self.master.winfo_height()
 
-                self.bot.record_action('click', x=x, y=y, button=button_type)
-                self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
+                # Get click coordinates relative to window
+                rel_x = event.x_root - win_x
+                rel_y = event.y_root - win_y
+
+                # Normalize coordinates
+                norm_x = rel_x / win_width
+                norm_y = rel_y / win_height
+
+                self.bot.record_action('click', 
+                                     x=norm_x,
+                                     y=norm_y,
+                                     absolute_x=rel_x,
+                                     absolute_y=rel_y,
+                                     button=button_type)
+
+                self.logger.debug(
+                    f"Mouse {button_type} recorded: " +
+                    f"Screen({event.x_root}, {event.y_root}), " +
+                    f"Window({win_x}, {win_y}), " +
+                    f"Relative({rel_x}, {rel_y}), " +
+                    f"Normalized({norm_x:.3f}, {norm_y:.3f})"
+                )
             except Exception as e:
                 self.logger.error(f"Error recording mouse event: {str(e)}")
+                self.logger.error(f"Stack trace: {traceback.format_exc()}")

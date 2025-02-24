@@ -804,7 +804,7 @@ class FishingBot:
             return [], []
 
     def move_mouse_to(self, x, y, duration=None):
-        """Move mouse with enhanced control and window coordinate translation"""
+        """Move mouse with enhanced control and coordinate validation"""
         try:
             if duration is None:
                 duration = self.config['mouse_movement_speed']
@@ -817,15 +817,13 @@ class FishingBot:
                 self.logger.error("Window not detected. Cannot move mouse.")
                 return False
 
-            # Translate coordinates relative to game window
-            window_x, window_y, _, _ = self.window_rect
-            target_x = window_x + x
-            target_y = window_y + y
+            # Log the target coordinates
+            self.logger.debug(f"Moving mouse to screen coordinates: ({x}, {y})")
 
             if self.pyautogui:
-                # Add slight randomization
-                target_x += random.uniform(-2, 2)
-                target_y += random.uniform(-2, 2)
+                # Add slight randomization to prevent detection
+                target_x = x + random.uniform(-2, 2)
+                target_y = y + random.uniform(-2, 2)
 
                 # Ensure window is active
                 if not self.is_window_active():
@@ -834,6 +832,7 @@ class FishingBot:
 
                 # Get current position
                 current_x, current_y = self.pyautogui.position()
+                self.logger.debug(f"Current mouse position: ({current_x}, {current_y})")
 
                 # Generate smooth path
                 points = self._generate_bezier_curve(
@@ -846,18 +845,67 @@ class FishingBot:
                 for point_x, point_y in points:
                     if self.stop_event.is_set():
                         return False
-                    self.pyautogui.moveTo(point_x, point_y, 
-                                        duration/len(points))
+                    self.pyautogui.moveTo(point_x, point_y, duration/len(points))
+                    self.logger.debug(f"Moved to intermediate point: ({point_x}, {point_y})")
 
-                # Record action if recording macro
-                self.record_action('mouse_move', x=x, y=y)
-                self.logger.debug(f"Moved mouse to ({target_x}, {target_y})")
+                # Verify final position
+                final_x, final_y = self.pyautogui.position()
+                self.logger.debug(f"Final mouse position: ({final_x}, {final_y})")
+
                 return True
             return False
 
         except Exception as e:
-            self.logger.error(f"Mouse movement error: {e}")
+            self.logger.error(f"Mouse movement error: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
             return False
+
+    def _generate_bezier_curve(self, x1, y1, x2, y2, num_points=20):
+        """Generate smooth mouse movement path using bezier curve
+        Args:
+            x1, y1: Start coordinates
+            x2, y2: End coordinates
+            num_points: Number of points to generate
+        Returns:
+            List of (x,y) coordinates for the path
+        """
+        try:
+            # Generate control points
+            # Place control points at 1/3 and 2/3 distance with slight offset
+            dx = x2 - x1
+            dy = y2 - y1
+            
+            # Log original coordinates and calculated offsets
+            self.logger.debug(f"Generating bezier curve:")
+            self.logger.debug(f"Start: ({x1}, {y1}), End: ({x2}, {y2})")
+            self.logger.debug(f"Offset: dx={dx}, dy={dy}")
+
+            # Calculate control points with reduced offset
+            cp1_x = x1 + dx/3 + random.uniform(-5, 5)
+            cp1_y = y1 + dy/3 + random.uniform(-5, 5)
+            cp2_x = x1 + 2*dx/3 + random.uniform(-5, 5)
+            cp2_y = y1 + 2*dy/3 + random.uniform(-5, 5)
+
+            self.logger.debug(f"Control points: ({cp1_x}, {cp1_y}), ({cp2_x}, {cp2_y})")
+
+            # Generate points along the curve
+            points = []
+            for i in range(num_points):
+                t = i / (num_points - 1)
+                # Cubic Bezier formula
+                x = (1-t)**3 * x1 + 3*(1-t)**2 * t * cp1_x + 3*(1-t) * t**2 * cp2_x + t**3 * x2
+                y = (1-t)**3 * y1 + 3*(1-t)**2 * t * cp1_y + 3*(1-t) * t**2 * cp2_y + t**3 * y2
+                points.append((int(x), int(y)))
+
+            self.logger.debug(f"Generated {len(points)} points for movement path")
+            return points
+
+        except Exception as e:
+            self.logger.error(f"Error generating bezier curve: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            # Fall back to linear path
+            return [(int(x1 + (x2-x1)*t/(num_points-1)), int(y1 + (y2-y1)*t/(num_points-1))) 
+                    for t in range(num_points)]
 
     def start_macro_recording(self, macro_name):
         """Start recording a new macro"""
@@ -883,17 +931,138 @@ class FishingBot:
 
             self.macros[self.current_macro] = self.macro_actions.copy()
             self.recording_macro = False
-            
-            # Save macros to file immediately
-            self._save_macros()
-            
-            self.logger.info(f"Stopped recording macro '{self.current_macro}' with {len(self.macro_actions)} actions")
-            self.current_macro = None
-            self.macro_actions = []
             return True
         except Exception as e:
             self.logger.error(f"Error stopping macro recording: {e}")
             return False
+
+    def play_macro(self, macro_name):
+        """Play recorded macro with improved coordinate handling"""
+        try:
+            if not self.macros.get(macro_name):
+                self.logger.error(f"Macro '{macro_name}' not found")
+                return False
+
+            if self.test_mode:
+                return True
+
+            # Get current window dimensions for coordinate translation
+            if not self.window_handle or not self.win32gui:
+                self.logger.error("Window not found for macro playback")
+                return False
+
+            # Use GetWindowRect for full window coordinates including borders
+            window_x, window_y, window_right, window_bottom = self.win32gui.GetWindowRect(self.window_handle)
+            win_width = window_right - window_x
+            win_height = window_bottom - window_y
+
+            self.logger.debug(f"Window dimensions for playback: {win_width}x{win_height} at ({window_x}, {window_y})")
+
+            for action in self.macros[macro_name]:
+                if self.stop_event.is_set():
+                    break
+
+                action_type = action.get('type')
+                if action_type == 'mouse_move':
+                    # Handle normalized coordinates
+                    if 'x' in action and 'y' in action:
+                        # Convert normalized coordinates (0-1) back to window coordinates
+                        norm_x = float(action['x'])
+                        norm_y = float(action['y'])
+                        
+                        # Calculate target position in window coordinates
+                        target_x = int(norm_x * win_width)
+                        target_y = int(norm_y * win_height)
+                        
+                        # Add window offset for absolute screen coordinates
+                        screen_x = window_x + target_x
+                        screen_y = window_y + target_y
+
+                        self.logger.debug(
+                            f"Moving mouse - " +
+                            f"Normalized({norm_x:.3f}, {norm_y:.3f}), " +
+                            f"Window({target_x}, {target_y}), " +
+                            f"Screen({screen_x}, {screen_y})"
+                        )
+                        
+                        self.move_mouse_to(screen_x, screen_y)
+                
+                elif action_type == 'click':
+                    if all(k in action for k in ['x', 'y']):
+                        # Convert normalized click coordinates
+                        norm_x = float(action['x'])
+                        norm_y = float(action['y'])
+                        
+                        target_x = int(norm_x * win_width) + window_x
+                        target_y = int(norm_y * win_height) + window_y
+                        
+                        self.logger.debug(f"Clicking at screen coordinates: ({target_x}, {target_y})")
+                        
+                        # Move to position first
+                        self.move_mouse_to(target_x, target_y)
+                        time.sleep(0.1)  # Short delay before click
+                        
+                        # Perform click
+                        button = action.get('button', 'left')
+                        if self.pyautogui:
+                            self.pyautogui.click(button=button)
+                            time.sleep(self.config['click_delay'])
+                    
+                elif action_type == 'key':
+                    key = action.get('key')
+                    if key:
+                        self.press_key(key)
+                
+                time.sleep(0.05)  # Small delay between actions
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error playing macro: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+    def record_action(self, action_type, **kwargs):
+        """Record action with improved coordinate handling"""
+        try:
+            # Record for learning mode first
+            if self.learning_mode and self.gameplay_learner:
+                position = (kwargs.get('x'), kwargs.get('y')) if 'x' in kwargs and 'y' in kwargs else None
+                self.gameplay_learner.record_action(action_type, position, **kwargs)
+                self.logger.debug(f"Recorded learning action: {action_type} at {position}")
+
+            # Then handle macro recording
+            if self.recording_macro:
+                if action_type == 'mouse_move':
+                    # Store normalized coordinates (0-1 range) for window independence
+                    # Get window dimensions for normalization 
+                    if self.window_handle and self.win32gui:
+                        _, _, win_width, win_height = self.win32gui.GetClientRect(self.window_handle)
+                        x = kwargs.get('x', 0) / win_width
+                        y = kwargs.get('y', 0) / win_height
+                    else:
+                        x = kwargs.get('x')
+                        y = kwargs.get('y')
+                        
+                    action = {
+                        'type': action_type,
+                        'x': x,
+                        'y': y,
+                        'timestamp': time.time()
+                    }
+                else:
+                    action = {
+                        'type': action_type,
+                        'timestamp': time.time(),
+                        **kwargs
+                    }
+
+                self.macro_actions.append(action)
+                self.logger.debug(f"Recorded macro action: {action_type} at {kwargs}")
+
+        except Exception as e:
+            self.logger.error(f"Error recording action: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
 
     def _save_macros(self):
         """Save macros to file"""
@@ -922,76 +1091,10 @@ class FishingBot:
             self.logger.error(f"Error loading macros: {e}")
             self.macros = {}
 
-    def record_action(self, action_type, **kwargs):
-        """Record player action for learning mode and macros
-        Args:
-            action_type: Type of action ('move', 'click', 'key', etc.)
-            **kwargs: Additional action parameters (x, y for mouse, key for keyboard, etc.)
-
-        This method records actions for both learning mode and macro recording.
-        """
-        try:
-            timestamp = time.time()
-            self.logger.debug(f"Recording action: {action_type} at {timestamp} with params {kwargs}")
-
-            if self.learning_mode and self.gameplay_learner:
-                # Record for learning mode
-                position = (kwargs.get('x'), kwargs.get('y')) if 'x' in kwargs and 'y' in kwargs else None
-                self.gameplay_learner.record_action(action_type, position, **kwargs)
-                self.logger.debug(f"Recorded learning action: {action_type} at {position}")
-
-            if self.recording_macro:
-                # Record for macro with detailed coordinates
-                action = {
-                    'type': action_type,
-                    'timestamp': timestamp
-                }
-
-                # Handle different action types
-                if action_type == 'mouse_move':
-                    action.update({
-                        'x': kwargs.get('x'),
-                        'y': kwargs.get('y')
-                    })
-                    self.logger.debug(f"Recording mouse movement to ({kwargs.get('x')}, {kwargs.get('y')})")
-                elif action_type == 'click':
-                    action.update({
-                        'x': kwargs.get('x'),
-                        'y': kwargs.get('y'),
-                        'button': kwargs.get('button', 'left')
-                    })
-                    self.logger.debug(f"Recording mouse click at ({kwargs.get('x')}, {kwargs.get('y')}) with button {kwargs.get('button')}")
-                elif action_type == 'key':
-                    action.update({
-                        'key': kwargs.get('key'),
-                        'duration': kwargs.get('duration', 0.1)
-                    })
-                    self.logger.debug(f"Recording key press: {kwargs.get('key')}")
-
-                self.macro_actions.append(action)
-                self.logger.debug(f"Added action to macro '{self.current_macro}', total actions: {len(self.macro_actions)}")
-
-        except Exception as e:
-            self.logger.error(f"Error recording action: {str(e)}")
-            self.logger.error(f"Stack trace: {traceback.format_exc()}")
 
 
 
-    def _generate_bezier_curve(self, x1, y1, x2, y2, num_points=20):
-        """Generate points along a bezier curve for smooth mouse movement"""
-        # Control points for the curve
-        control_x = x1 + (x2 - x1) * random.uniform(0.3, 0.7)
-        control_y = y1 + (y2 - y1) * random.uniform(0.3, 0.7)
-
-        points = []
-        for i in range(num_points):
-            t = i / (num_points - 1)
-            # Quadratic Bezier curve formula
-            x = (1-t)**2 * x1 + 2*(1-t)*t * control_x + t**2 * x2
-            y = (1-t)**2 * y1 + 2*(1-t)*t * control_y + t**2 * y2
-            points.append((int(x), int(y)))
-
-        return points
+    # Removed old _generate_bezier_curve implementation in favor of enhanced version above
 
     def click(self, x=None, y=None, button='left', clicks=1, interval=None):
         """Perform mouse click with optional position and window coordinate translation"""
