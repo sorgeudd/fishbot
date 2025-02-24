@@ -5,6 +5,7 @@ import random
 import traceback
 from ctypes import Structure, c_long, c_ulong, sizeof, POINTER, pointer
 import logging
+import platform
 
 # Windows API Constants
 MOUSEEVENTF_MOVE = 0x0001
@@ -44,23 +45,35 @@ class DirectInput:
         self.test_mode = test_mode
 
         try:
-            self.user32 = ctypes.windll.user32
-            # Get virtual screen metrics to handle multi-monitor setups
-            self.screen_left = self.user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
-            self.screen_top = self.user32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
-            self.screen_width = self.user32.GetSystemMetrics(78) # SM_CXVIRTUALSCREEN
-            self.screen_height = self.user32.GetSystemMetrics(79)# SM_CYVIRTUALSCREEN
-            self.logger.info(f"Initialized DirectInput with virtual screen: {self.screen_width}x{self.screen_height} at ({self.screen_left}, {self.screen_top})")
+            if platform.system() == 'Windows' and not test_mode:
+                try:
+                    self.user32 = ctypes.windll.user32
+                    # Get virtual screen metrics to handle multi-monitor setups
+                    self.screen_left = self.user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+                    self.screen_top = self.user32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
+                    self.screen_width = self.user32.GetSystemMetrics(78) # SM_CXVIRTUALSCREEN
+                    self.screen_height = self.user32.GetSystemMetrics(79)# SM_CYVIRTUALSCREEN
+                    self.logger.info(f"Initialized DirectInput with virtual screen: {self.screen_width}x{self.screen_height} at ({self.screen_left}, {self.screen_top})")
+                except AttributeError:
+                    raise ImportError("Windows-specific functionality not available")
+            else:
+                # Use default values for test mode
+                self.screen_left = 0
+                self.screen_top = 0
+                self.screen_width = 1920 if not test_mode else 800
+                self.screen_height = 1080 if not test_mode else 600
+                self.logger.info("Running in test mode with default screen metrics")
+                self.user32 = None
         except Exception as e:
-            if not test_mode:
-                self.logger.error(f"Failed to initialize DirectInput: {e}")
-                raise
-            # Use default values for test mode
+            self.logger.error(f"Failed to initialize DirectInput: {e}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            # Use test mode defaults
             self.screen_left = 0
             self.screen_top = 0
-            self.screen_width = 1920
-            self.screen_height = 1080
-            self.logger.info("Running in test mode with default screen metrics")
+            self.screen_width = 800
+            self.screen_height = 600
+            self.user32 = None
+            self.logger.info("Falling back to test mode")
 
     def _normalize_coordinates(self, x, y):
         """Convert screen coordinates to normalized coordinates (0-65535 range)"""

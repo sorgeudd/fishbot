@@ -12,10 +12,27 @@ import wave
 import numpy as np
 import traceback
 from collections import deque
-from ctypes import Structure, pointer, c_long, windll
+from ctypes import Structure, c_long
+
+# Platform-specific imports
+if platform.system() == 'Windows':
+    import win32gui
+    import win32process
+    from ctypes import windll
+    user32 = windll.user32
+else:
+    win32gui = None
+    win32process = None
+    user32 = None
 
 class POINT(Structure):
     _fields_ = [("x", c_long), ("y", c_long)]
+
+# Import DirectInput
+try:
+    from direct_input import DirectInput
+except ImportError:
+    DirectInput = None
 
 try:
     from vision_system import VisionSystem
@@ -32,6 +49,12 @@ class FishingBot:
         self.test_mode = test_mode
         self.test_env = test_env
 
+        # Platform-specific initialization
+        self.is_windows = platform.system() == 'Windows'
+        if not self.is_windows:
+            self.logger.warning("Running in test mode (non-Windows platform)")
+            self.test_mode = True
+
         # Load default configuration first
         self._load_default_config()
 
@@ -40,9 +63,25 @@ class FishingBot:
         self.cv2 = None
         self.np = None
         self.ImageGrab = None
-        self.win32gui = None
-        self.win32process = None
-        self.pyaudio = None
+        self.win32gui = win32gui if self.is_windows else None
+        self.win32process = win32process if self.is_windows else None
+        self.user32 = user32 if self.is_windows else None
+        
+        # Initialize DirectInput
+        if DirectInput is not None:
+            try:
+                self.direct_input = DirectInput(test_mode=self.test_mode)
+                self.logger.info("DirectInput initialized for mouse control")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize DirectInput: {e}")
+                self.direct_input = None
+                if not self.test_mode and self.is_windows:
+                    raise
+        else:
+            self.direct_input = None
+            if not self.test_mode and self.is_windows:
+                self.logger.error("DirectInput module not available")
+                raise ImportError("DirectInput module required but not found")
 
         self._init_dependencies()
         self._init_ai_components()
@@ -103,43 +142,20 @@ class FishingBot:
 
     def _init_dependencies(self):
         """Initialize dependencies based on platform"""
-        if self.test_mode:
-            self.direct_input = DirectInput(test_mode=True)
-            return
-
         try:
             import cv2
             import numpy as np
             from PIL import ImageGrab
-            from direct_input import DirectInput
 
             self.cv2 = cv2
             self.np = np
             self.ImageGrab = ImageGrab
-            
-            # Initialize DirectInput 
-            self.direct_input = DirectInput(test_mode=False)
-            self.logger.info("DirectInput initialized for mouse control")
-
-            # Only import Windows-specific modules when on Windows
-            if platform.system() == 'Windows':
-                import win32gui
-                import win32process
-
-                self.win32gui = win32gui
-                self.win32process = win32process
-                self.user32 = windll.user32
-                self.logger.debug("Initialized Win32 API modules")
-            else:
-                self.logger.warning("Running on non-Windows platform. Some features will be limited.")
-                self.win32gui = None
-                self.win32process = None
-                self.user32 = None
 
             self.logger.info("Successfully initialized dependencies")
         except ImportError as e:
             self.logger.error(f"Failed to import required modules: {str(e)}")
-            raise ImportError(f"Missing required module: {str(e)}")
+            if not self.test_mode:
+                raise ImportError(f"Missing required module: {str(e)}")
 
     def _load_default_config(self):
         """Load default configuration"""
