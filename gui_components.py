@@ -490,11 +490,14 @@ class MainWindow:
             if self.record_sound_btn.cget("text") == "Record Sound":
                 self.record_sound_btn.config(text="Stop Recording")
                 self.status_label.config(text="Recording Sound...")
+                self.logger.info(f"Started recording sound: {trigger_name}")
                 self.bot.start_sound_monitoring()
             else:
                 self.record_sound_btn.config(text="Record Sound")
                 self.status_label.config(text="Sound Recorded")
+                self.logger.info("Stopped recording sound")
                 self.bot.stop_sound_monitoring()
+                self._update_sound_list()
 
         except Exception as e:
             self.logger.error(f"Error recording sound: {str(e)}")
@@ -517,19 +520,23 @@ class MainWindow:
                     messagebox.showerror("Error", "Please enter a key")
                     return
                 action = lambda: self.bot.press_key(action_key)
+                self.logger.info(f"Creating key press trigger for key: {action_key}")
             elif action_type in ["Left Click", "Right Click", "Middle Click"]:
                 button = action_type.lower().replace(" click", "")
                 action = lambda: self.bot.click(button=button)
+                self.logger.info(f"Creating mouse click trigger for button: {button}")
             else:  # Macro
                 macro_name = self.action_key_entry.get().strip()
                 if not macro_name:
                     messagebox.showerror("Error", "Please enter a macro name")
                     return
                 action = lambda: self.bot.play_macro(macro_name)
+                self.logger.info(f"Creating macro trigger for macro: {macro_name}")
 
             # Save trigger
             if self.bot.add_sound_trigger(trigger_name, action):
                 self.status_label.config(text="Trigger Saved")
+                self.logger.info(f"Saved sound trigger: {trigger_name}")
                 self.trigger_name_entry.delete(0, tk.END)
                 self.action_key_entry.delete(0, tk.END)
                 self._update_sound_list()
@@ -549,27 +556,36 @@ class MainWindow:
                     messagebox.showerror("Error", "Please enter a macro name")
                     return
 
+                self.logger.debug("Starting macro recording...")
                 if self.bot.start_macro_recording(macro_name):
                     self.record_macro_btn.config(text="Stop Recording")
                     self.play_macro_btn.config(state="disabled")
                     self.status_label.config(text=f"Recording Macro: {macro_name}")
+                    self.logger.info(f"Started recording macro: {macro_name}")
 
-                    # Start capturing mouse movements globally
+                    # Start capturing mouse movements
                     self.capture_mouse = True
-                    self.after(50, self._check_mouse_position)  # Check every 50ms
+                    self.logger.debug("Starting mouse position capture")
+                    self._check_mouse_position()
             else:
+                self.logger.debug("Stopping macro recording...")
                 if self.bot.stop_macro_recording():
                     self.record_macro_btn.config(text="Record Macro")
                     self.play_macro_btn.config(state="normal")
                     self.status_label.config(text="Macro Recorded")
-                    self.macro_name_entry.delete(0, tk.END)
-                    self._update_macro_list()
+                    self.logger.info("Stopped recording macro and saved")
 
                     # Stop mouse movement capture
                     self.capture_mouse = False
+                    self.logger.debug("Stopped mouse position capture")
+
+                    # Update macro list and clear entry
+                    self.macro_name_entry.delete(0, tk.END)
+                    self._update_macro_list()
 
         except Exception as e:
             self.logger.error(f"Error toggling macro recording: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
             messagebox.showerror("Error", f"Failed to toggle macro recording: {str(e)}")
 
     def _check_mouse_position(self):
@@ -577,16 +593,22 @@ class MainWindow:
         if self.capture_mouse and self.bot.recording_macro:
             try:
                 # Get current mouse position relative to screen
-                x = self.master.winfo_pointerx() - self.master.winfo_rootx()
-                y = self.master.winfo_pointery() - self.master.winfo_rooty()
+                x = self.master.winfo_pointerx()
+                y = self.master.winfo_pointery()
 
-                # Record the position
+                # Convert to window coordinates
+                x = x - self.master.winfo_rootx()
+                y = y - self.master.winfo_rooty()
+
+                # Record the position with detailed logging
                 self.bot.record_action('mouse_move', x=x, y=y)
+                self.logger.debug(f"Mouse position recorded: ({x}, {y})")
 
                 # Schedule next check
-                self.after(50, self._check_mouse_position)
+                self.master.after(50, self._check_mouse_position)
             except Exception as e:
                 self.logger.error(f"Error capturing mouse position: {str(e)}")
+                self.logger.error(f"Stack trace: {traceback.format_exc()}")
 
     def _on_mouse_event(self, button_type, event):
         """Handle mouse click events during macro recording"""
@@ -668,19 +690,31 @@ class MainWindow:
 
     def _update_macro_list(self):
         """Update the macro selection dropdown"""
-        if hasattr(self.bot, 'macros'):
-            macro_names = list(self.bot.macros.keys())
-            self.macro_select['values'] = macro_names
-            if macro_names:
-                self.macro_select.set(macro_names[0])
+        try:
+            if hasattr(self.bot, 'macros'):
+                macro_names = list(self.bot.macros.keys())
+                self.macro_select['values'] = macro_names
+                if macro_names:
+                    self.macro_select.set(macro_names[0])
+                    self.logger.debug(f"Updated macro list with {len(macro_names)} macros")
+                else:
+                    self.logger.debug("No macros available")
+        except Exception as e:
+            self.logger.error(f"Error updating macro list: {str(e)}")
 
     def _update_sound_list(self):
         """Update the sound selection dropdown"""
-        if hasattr(self.bot, 'sound_triggers'):
-            sound_names = list(self.bot.sound_triggers.keys())
-            self.sound_select['values'] = sound_names
-            if sound_names:
-                self.sound_select.set(sound_names[0])
+        try:
+            if hasattr(self.bot, 'sound_triggers'):
+                sound_names = list(self.bot.sound_triggers.keys())
+                self.sound_select['values'] = sound_names
+                if sound_names:
+                    self.sound_select.set(sound_names[0])
+                    self.logger.debug(f"Updated sound trigger list with {len(sound_names)} triggers")
+                else:
+                    self.logger.debug("No sound triggers available")
+        except Exception as e:
+            self.logger.error(f"Error updating sound trigger list: {str(e)}")
 
     def _on_key_event(self, event):
         """Handle keyboard events during macro recording"""

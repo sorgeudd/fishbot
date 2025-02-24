@@ -245,6 +245,47 @@ class FishingBot:
             self.logger.error(f"Error in _find_window_by_title: {str(e)}")
             return False
 
+    def _save_sound_triggers(self):
+        """Save sound triggers to file"""
+        try:
+            trigger_file = Path("models/sound_triggers.json")
+            trigger_file.parent.mkdir(exist_ok=True)
+
+            # Convert sound trigger data to serializable format
+            serializable_triggers = {}
+            for name, trigger in self.sound_triggers.items():
+                serializable_triggers[name] = {
+                    'pattern': trigger['pattern'].tolist() if isinstance(trigger['pattern'], np.ndarray) else trigger['pattern'],
+                    'threshold': trigger['threshold']
+                }
+
+            with open(trigger_file, 'w') as f:
+                json.dump(serializable_triggers, f, indent=2)
+            self.logger.info(f"Saved {len(serializable_triggers)} sound triggers")
+        except Exception as e:
+            self.logger.error(f"Error saving sound triggers: {e}")
+
+    def _load_sound_triggers(self):
+        """Load sound triggers from file"""
+        try:
+            trigger_file = Path("models/sound_triggers.json")
+            if trigger_file.exists():
+                with open(trigger_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Convert loaded data back to sound triggers
+                for name, trigger_data in data.items():
+                    pattern = np.array(trigger_data['pattern']) if isinstance(trigger_data['pattern'], list) else trigger_data['pattern']
+                    self.sound_triggers[name] = {
+                        'pattern': pattern,
+                        'threshold': trigger_data['threshold'],
+                        'action': None  # Action will be set when binding is created
+                    }
+                self.logger.info(f"Loaded {len(self.sound_triggers)} sound triggers")
+        except Exception as e:
+            self.logger.error(f"Error loading sound triggers: {e}")
+            self.sound_triggers = {}
+
     def get_window_info(self):
         """Get detailed information about the current game window"""
         if self.test_mode:
@@ -775,6 +816,97 @@ class FishingBot:
         except Exception as e:
             self.logger.error(f"Mouse movement error: {e}")
             return False
+
+    def start_macro_recording(self, macro_name):
+        """Start recording a new macro"""
+        try:
+            if self.recording_macro:
+                self.logger.warning("Already recording a macro")
+                return False
+
+            self.recording_macro = True
+            self.current_macro = macro_name
+            self.macro_actions = []
+            self.logger.info(f"Started recording macro: {macro_name}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error starting macro recording: {e}")
+            return False
+
+    def stop_macro_recording(self):
+        """Stop recording the current macro"""
+        try:
+            if not self.recording_macro:
+                return False
+
+            self.macros[self.current_macro] = self.macro_actions.copy()
+            self.recording_macro = False
+            
+            # Save macros to file immediately
+            self._save_macros()
+            
+            self.logger.info(f"Stopped recording macro '{self.current_macro}' with {len(self.macro_actions)} actions")
+            self.current_macro = None
+            self.macro_actions = []
+            return True
+        except Exception as e:
+            self.logger.error(f"Error stopping macro recording: {e}")
+            return False
+
+    def _save_macros(self):
+        """Save macros to file"""
+        try:
+            macro_file = Path("models/macros.json")
+            macro_file.parent.mkdir(exist_ok=True)
+
+            with open(macro_file, 'w') as f:
+                json.dump(self.macros, f, indent=2)
+            self.logger.info(f"Saved {len(self.macros)} macros to file")
+        except Exception as e:
+            self.logger.error(f"Error saving macros: {e}")
+
+    def _load_macros(self):
+        """Load macros from file"""
+        try:
+            macro_file = Path("models/macros.json")
+            if macro_file.exists():
+                with open(macro_file, 'r') as f:
+                    self.macros = json.load(f)
+                self.logger.info(f"Loaded {len(self.macros)} macros from file")
+            else:
+                self.macros = {}
+                self.logger.info("No saved macros found")
+        except Exception as e:
+            self.logger.error(f"Error loading macros: {e}")
+            self.macros = {}
+
+    def record_action(self, action_type, **kwargs):
+        """Record player action for learning mode and macros
+        Args:
+            action_type: Type of action ('move', 'click', 'key', etc.)
+            **kwargs: Additional action parameters (x, y for mouse, key for keyboard, etc.)
+        """
+        try:
+            if self.learning_mode and self.gameplay_learner:
+                # Record for learning mode
+                position = (kwargs.get('x'), kwargs.get('y')) if 'x' in kwargs and 'y' in kwargs else None
+                self.gameplay_learner.record_action(action_type, position, **kwargs)
+                self.logger.debug(f"Recorded learning action: {action_type} at {position}")
+
+            if self.recording_macro:
+                # Record for macro
+                action = {
+                    'type': action_type,
+                    'timestamp': time.time(),
+                    **kwargs
+                }
+                self.macro_actions.append(action)
+                self.logger.debug(f"Recorded macro action: {action_type} with params {kwargs}")
+
+        except Exception as e:
+            self.logger.error(f"Error recording action: {str(e)}")
+
+
 
     def _generate_bezier_curve(self, x1, y1, x2, y2, num_points=20):
         """Generate points along a bezier curve for smooth mouse movement"""
