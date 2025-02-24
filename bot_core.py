@@ -9,10 +9,26 @@ import random
 import json
 import pyaudio
 import wave
-import numpy as np
 import traceback
 from collections import deque
-from ctypes import Structure, c_long
+import ctypes
+from ctypes import Structure, c_long, byref, POINTER
+
+# Optional imports that may fail
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+try:
+    from PIL import ImageGrab
+except ImportError:
+    ImageGrab = None
 
 # Platform-specific imports
 if platform.system() == 'Windows':
@@ -887,6 +903,205 @@ class FishingBot:
                 self.logger.error("Window not detected. Cannot move mouse.")
                 return False
 
+            # Get current window position and dimensions 
+            win_x, win_y, win_right, win_bottom = self.window_rect
+            win_width = win_right - win_x
+            win_height = win_bottom - win_y
+
+            # Convert target coordinates to absolute screen coordinates
+            screen_x = x + win_x
+            screen_y = y + win_y
+            
+            # Log detailed coordinate information
+            self.logger.debug("Mouse movement coordinate translation:")
+            self.logger.debug(f"Window bounds: {self.window_rect}")
+            self.logger.debug(f"Window-relative coordinates: ({x}, {y})")
+            self.logger.debug(f"Computed screen coordinates: ({screen_x}, {screen_y})")
+
+            # Ensure window is active before moving
+            if not self.is_window_active():
+                self.activate_window()
+                time.sleep(0.1)
+
+            # Use DirectInput for precise movement
+            if self.direct_input:
+                success = self.direct_input.move_mouse(screen_x, screen_y)
+                if success and self.user32:
+                    # Record final position
+                    final = POINT()
+                    self.user32.GetCursorPos(byref(final))
+                    self.logger.debug(f"Final screen position: ({final.x}, {final.y})")
+                    self.logger.debug(f"Relative to window: ({final.x - win_x}, {final.y - win_y})")
+
+                    # Handle test environment feedback
+                    if self.test_mode and hasattr(self.test_env, 'get_screen_region'):
+                        pos = self.test_env.get_screen_region().get('mouse_pos')
+                        if pos:
+                            self.logger.debug(f"Test env mouse position: {pos}")
+                return success
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Mouse movement error: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+    def record_action(self, action_type, position=None, **kwargs):
+        """Record action with improved coordinate handling
+        Args:
+            action_type: Type of action ('move', 'click', 'key', etc.)
+            position: Optional position tuple for the action
+            **kwargs: Additional action parameters
+        """
+        try:
+            # Record for learning mode first
+            if self.learning_mode and self.gameplay_learner:
+                self.gameplay_learner.record_action(action_type, position, **kwargs)
+                self.logger.debug(f"Recorded learning action: {action_type} at {position}")
+
+            # Then handle macro recording
+            if self.recording_macro:
+                # Handle mouse coordinate normalization
+                if action_type in ['mouse_move', 'mouse_click'] and 'x' in kwargs and 'y' in kwargs:
+                    if self.window_rect:
+                        win_x, win_y, win_right, win_bottom = self.window_rect
+                        win_width = win_right - win_x
+                        win_height = win_bottom - win_y
+                        
+                        # Get relative coordinates
+                        x = kwargs.get('x')
+                        y = kwargs.get('y')
+                        rel_x = x - win_x if x is not None else None
+                        rel_y = y - win_y if y is not None else None
+                        
+                        # Normalize to 0-1 range
+                        norm_x = rel_x / win_width if rel_x is not None else None
+                        norm_y = rel_y / win_height if rel_y is not None else None
+                        
+                        self.logger.debug(
+                            f"Recording {action_type}: " +
+                            f"Screen({x}, {y}) -> " +
+                            f"Relative({rel_x}, {rel_y}) -> " +
+                            f"Normalized({norm_x:.3f}, {norm_y:.3f})"
+                        )
+                        
+                        kwargs['x'] = norm_x
+                        kwargs['y'] = norm_y
+                    else:
+                        self.logger.warning("No window bounds available for coordinate normalization")
+
+                # Create action record with timestamp
+                action = {
+                    'type': action_type,
+                    'timestamp': time.time(),
+                    **kwargs
+                }
+                
+                self.macro_actions.append(action)
+                self.logger.debug(f"Recorded macro action: {action}")
+
+        except Exception as e:
+            self.logger.error(f"Error recording action: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+
+    def play_macro(self, macro_name):
+        """Play recorded macro with improved coordinate handling"""
+        try:
+            if not self.macros.get(macro_name):
+                self.logger.error(f"Macro '{macro_name}' not found")
+                return False
+
+            self.logger.info(f"Playing macro: {macro_name}")
+
+            if self.test_mode:
+                self.logger.info("Test mode: Simulating macro playback")
+                return True
+
+            # Get current window dimensions for coordinate translation
+            if not self.window_handle or not self.win32gui:
+                self.logger.error("Window not found for macro playback")
+                return False
+
+            # Use GetWindowRect for full window coordinates including borders
+            window_x, window_y, window_right, window_bottom = self.win32gui.GetWindowRect(self.window_handle)
+            win_width = window_right - window_x
+            win_height = window_bottom - window_y
+
+            self.logger.debug(f"Window dimensions for playback: {win_width}x{win_height} at ({window_x}, {window_y})")
+
+            for action in self.macros[macro_name]:
+                if self.stop_event.is_set():
+                    self.logger.info("Macro playback stopped")
+                    return False
+
+                action_type = action.get('type')
+                self.logger.debug(f"Executing action: {action}")
+
+                if action_type == 'mouse_move':
+                    if all(k in action for k in ['x', 'y']):
+                        # Denormalize coordinates
+                        norm_x = float(action['x'])
+                        norm_y = float(action['y'])
+                        
+                        screen_x = window_x + int(norm_x * win_width)
+                        screen_y = window_y + int(norm_y * win_height)
+                        
+                        self.logger.debug(
+                            f"Moving mouse - " +
+                            f"Normalized({norm_x:.3f}, {norm_y:.3f}) -> " +
+                            f"Screen({screen_x}, {screen_y})"
+                        )
+                        
+                        self.move_mouse_to(screen_x, screen_y)
+
+                elif action_type in ['mouse_click', 'click']:
+                    if all(k in action for k in ['x', 'y']):
+                        # Convert normalized click coordinates
+                        norm_x = float(action['x'])
+                        norm_y = float(action['y'])
+                        
+                        target_x = window_x + int(norm_x * win_width)
+                        target_y = window_y + int(norm_y * win_height)
+                        
+                        self.logger.debug(f"Clicking at screen coordinates: ({target_x}, {target_y})")
+                        
+                        # Move to position first
+                        self.move_mouse_to(target_x, target_y)
+                        time.sleep(0.1)  # Short delay before click
+                        
+                        # Perform click
+                        button = action.get('button', 'left')
+                        if self.direct_input:
+                            self.direct_input.click(button=button)
+                            time.sleep(self.config['click_delay'])
+                    else:
+                        # Handle standalone clicks without coordinates
+                        button = action.get('button', 'left')
+                        if self.direct_input:
+                            self.direct_input.click(button=button)
+
+                elif action_type in ['key', 'key_press']:
+                    key = action.get('key')
+                    if key:
+                        self.logger.debug(f"Pressing key: {key}")
+                        if self.direct_input:
+                            self.direct_input.tap_key(key)
+
+                # Add small delay between actions
+                delay = 0.1 if self.test_mode else random.uniform(0.2, 0.5)
+                time.sleep(delay)
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error playing macro: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+            if not self.window_handle or not self.window_rect:
+                self.logger.error("Window not detected. Cannot move mouse.")
+                return False
+
             # Get current window position and dimensions
             win_x, win_y, win_right, win_bottom = self.window_rect
             win_width = win_right - win_x
@@ -995,6 +1210,9 @@ class FishingBot:
 
             self.macros[self.current_macro] = self.macro_actions.copy()
             self.recording_macro = False
+
+            # Save macros to file
+            self._save_macros()
             return True
         except Exception as e:
             self.logger.error(f"Error stopping macro recording: {e}")
@@ -1024,34 +1242,30 @@ class FishingBot:
 
             for action in self.macros[macro_name]:
                 if self.stop_event.is_set():
-                    break
+                    self.logger.info("Macro playback stopped")
+                    return False
 
                 action_type = action.get('type')
+                self.logger.debug(f"Executing action: {action}")
+
                 if action_type == 'mouse_move':
-                    # Handle normalized coordinates
-                    if 'x' in action and 'y' in action:
-                        # Convert normalized coordinates (0-1) back to window coordinates
+                    if all(k in action for k in ['x', 'y']):
+                        # Denormalize coordinates
                         norm_x = float(action['x'])
                         norm_y = float(action['y'])
                         
-                        # Calculate target position in window coordinates
-                        target_x = int(norm_x * win_width)
-                        target_y = int(norm_y * win_height)
+                        screen_x = window_x + int(norm_x * win_width)
+                        screen_y = window_y + int(norm_y * win_height)
                         
-                        # Add window offset for absolute screen coordinates
-                        screen_x = window_x + target_x
-                        screen_y = window_y + target_y
-
                         self.logger.debug(
                             f"Moving mouse - " +
-                            f"Normalized({norm_x:.3f}, {norm_y:.3f}), " +
-                            f"Window({target_x}, {target_y}), " +
+                            f"Normalized({norm_x:.3f}, {norm_y:.3f}) -> " +
                             f"Screen({screen_x}, {screen_y})"
                         )
                         
                         self.move_mouse_to(screen_x, screen_y)
-                
-                elif action_type == 'click':
+
+                elif action_type in ['mouse_click', 'click']:
                     if all(k in action for k in ['x', 'y']):
                         # Convert normalized click coordinates
                         norm_x = float(action['x'])
@@ -1068,16 +1282,20 @@ class FishingBot:
                         
                         # Perform click
                         button = action.get('button', 'left')
-                        if self.pyautogui:
-                            self.pyautogui.click(button=button)
+                        if self.direct_input:
+                            self.direct_input.click(button=button)
                             time.sleep(self.config['click_delay'])
-                    
-                elif action_type == 'key':
+
+                elif action_type in ['key', 'key_press']:
                     key = action.get('key')
                     if key:
-                        self.press_key(key)
-                
-                time.sleep(0.05)  # Small delay between actions
+                        self.logger.debug(f"Pressing key: {key}")
+                        if self.direct_input:
+                            self.direct_input.tap_key(key)
+
+                # Add small delay between actions
+                delay = 0.1 if self.test_mode else random.uniform(0.2, 0.5)
+                time.sleep(delay)
 
             return True
 
