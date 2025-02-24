@@ -679,7 +679,7 @@ class MainWindow:
             try:
                 # Get click position relative to window
                 x = event.x_root - self.master.winfo_rootx()
-                y = event.y_root - self.master.winfo_rooty()
+                y = event.rooty()
 
                 self.bot.record_action('click', x=x, y=y, button=button_type)
                 self.logger.debug(f"Recorded mouse {button_type} at ({x}, {y})")
@@ -687,26 +687,27 @@ class MainWindow:
                 self.logger.error(f"Error recording mouse event: {str(e)}")
 
     def _open_settings(self):
-        #        # To be implemented
+        """Open the settings dialog"""
         self.logger.info("Opening settings...")
         pass
 
     def _set_region(self):
-        # To be implemented
+        """Set the minigame region"""
         self.logger.info("Setting minigame region...")
         pass
 
     def _select_game_window(self):
-        # To be implemented
+        """Select the game window"""
         self.logger.info("Selecting game window...")
         pass
 
     def _add_obstacle(self):
-        # To be implemented
-        self.logger.info("Adding obstacle...")        pass
+        """Add an obstacle to the game environment"""
+        self.logger.info("Adding obstacle...")
+        pass
 
     def _clear_obstacles(self):
-        # To be implemented
+        """Clear all obstacles from the game environment"""
         self.logger.info("Clearing obstacles...")
         pass
 
