@@ -257,7 +257,8 @@ class FishingBot:
             for name, trigger in self.sound_triggers.items():
                 serializable_triggers[name] = {
                     'pattern': trigger['pattern'].tolist() if isinstance(trigger['pattern'], np.ndarray) else trigger['pattern'],
-                    'threshold': trigger['threshold']
+                    'threshold': trigger['threshold'],
+                    'action_type': trigger.get('action_type', None)  # Store action type for reconstruction
                 }
 
             with open(trigger_file, 'w') as f:
@@ -265,6 +266,7 @@ class FishingBot:
             self.logger.info(f"Saved {len(serializable_triggers)} sound triggers")
         except Exception as e:
             self.logger.error(f"Error saving sound triggers: {e}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
 
     def _load_sound_triggers(self):
         """Load sound triggers from file"""
@@ -300,20 +302,25 @@ class FishingBot:
                 self.logger.error("No trigger name provided")
                 return False
 
-            if trigger_name not in self.sound_triggers:
-                self.logger.error(f"No recorded sound pattern found for trigger: {trigger_name}")
-                return False
-
-            if action is None:
+            if not action:
                 self.logger.error("No action provided for trigger")
                 return False
+
+            # Create new trigger if it doesn't exist
+            if trigger_name not in self.sound_triggers:
+                self.sound_triggers[trigger_name] = {
+                    'pattern': None,
+                    'threshold': self.audio_threshold
+                }
+                self.logger.debug(f"Created new sound trigger: {trigger_name}")
 
             # Update the trigger with the action
             self.sound_triggers[trigger_name]['action'] = action
             self.logger.info(f"Added action to sound trigger: {trigger_name}")
 
-            # Save updated triggers
+            # Save updated triggers to file
             self._save_sound_triggers()
+            self.logger.debug("Saved sound triggers to file")
             return True
 
         except Exception as e:

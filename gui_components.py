@@ -533,6 +533,7 @@ class MainWindow:
                 return
 
             action_type = self.action_type.get()
+            self.logger.debug(f"Creating sound trigger '{trigger_name}' with action type: {action_type}")
 
             # Create the action function based on type
             if action_type == "Key Press":
@@ -559,12 +560,12 @@ class MainWindow:
 
             if success:
                 self.status_label.config(text="Trigger Saved")
-                self.logger.info(f"Saved sound trigger: {trigger_name}")
+                self.logger.info(f"Successfully saved sound trigger: {trigger_name}")
                 self.trigger_name_entry.delete(0, tk.END)
                 self.action_key_entry.delete(0, tk.END)
                 self._update_sound_list()
             else:
-                self.logger.error("Failed to save trigger")
+                self.logger.error(f"Failed to save trigger: {trigger_name}")
                 messagebox.showerror("Error", "Failed to save trigger")
 
         except Exception as e:
@@ -636,20 +637,27 @@ class MainWindow:
                 rel_x = x - win_x
                 rel_y = y - win_y
 
-                # Check if mouse is within window boundaries
-                if 0 <= rel_x <= win_width and 0 <= rel_y <= win_height:
+                # Check if mouse is within window boundaries and if position has changed
+                if (0 <= rel_x <= win_width and 0 <= rel_y <= win_height and
+                    not hasattr(self, '_last_pos') or 
+                    (self._last_pos != (rel_x, rel_y))):
+
                     # Record the position with detailed logging
                     self.bot.record_action('mouse_move', x=rel_x, y=rel_y)
                     self.logger.debug(f"Mouse position recorded: ({rel_x}, {rel_y}) - Screen: ({x}, {y}), Window: ({win_x}, {win_y})")
-                else:
-                    self.logger.debug(f"Mouse outside window bounds: ({rel_x}, {rel_y})")
 
-                # Schedule next check with longer interval to prevent overwhelming
+                    # Update last position
+                    self._last_pos = (rel_x, rel_y)
+                else:
+                    self.logger.debug(f"Skipped recording - Mouse outside bounds or position unchanged: ({rel_x}, {rel_y})")
+
+                # Schedule next check with longer interval
                 if self.capture_mouse:  # Check if still capturing before scheduling
-                    self.master.after(150, self._check_mouse_position)  # Increased from 100ms to 150ms
+                    self.master.after(200, self._check_mouse_position)  # Increased interval
             except Exception as e:
                 self.logger.error(f"Error capturing mouse position: {str(e)}")
                 self.logger.error(f"Stack trace: {traceback.format_exc()}")
+                self.capture_mouse = False  # Stop capturing on error
 
     def _update_macro_list(self):
         """Update the macro selection dropdown"""
